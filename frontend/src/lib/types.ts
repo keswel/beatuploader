@@ -1,0 +1,98 @@
+// Mirrors backend Pydantic schemas. Keep in sync with app/schemas/*.
+
+export type PlatformProvider =
+  | "beatstars"
+  | "youtube"
+  | "soundcloud"
+  | "spotify"
+  | "audiomack"
+  | "bandcamp";
+
+export type PlatformStatus = "connected" | "disconnected" | "error";
+
+export type UploadStatus = "queued" | "uploading" | "done" | "failed";
+
+export type BeatPlatformStatus = "live" | "uploading" | "failed" | "none";
+
+export interface User {
+  id: number;
+  email: string;
+  handle: string;
+  plan: string;
+  created_at: string;
+}
+
+export interface Token {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
+export interface PlatformOut {
+  id: number;
+  provider: PlatformProvider;
+  status: PlatformStatus;
+  account_label: string | null;
+  connected_at: string | null;
+  last_error: string | null;
+}
+
+export interface UploadOut {
+  id: number;
+  filename: string;
+  size_bytes: number;
+  progress: number;
+  status: UploadStatus;
+  targets: Record<string, { status: UploadStatus; progress: number }>;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  has_artwork: boolean;
+}
+
+export type LicenseType =
+  | "AUTO"
+  | "EXCLUSIVE"
+  | "PREMIUM_PLUS"
+  | "PREMIUM"
+  | "UNLIMITED";
+
+export interface UploadCreate {
+  filename: string;
+  size_bytes: number;
+  targets: PlatformProvider[];
+  title?: string;
+  tags?: string[];
+  bpm?: number;
+  music_key?: string;
+  price_cents?: number;
+  license_type?: LicenseType;
+  genre?: string;
+}
+
+export interface UploadFiles {
+  // tagged (MP3) is the required file — Basic license needs it,
+  // and BeatStars can't publish without an MP3 preview
+  tagged: File;
+  master?: File;
+  stems?: File;
+  artwork?: File;  // cover art (PNG/JPG)
+}
+
+export interface BeatOut {
+  id: number;
+  title: string;
+  bpm: number | null;
+  music_key: string | null;
+  tags: string[];
+  price_cents: number | null;
+  plays: number;
+  platform_statuses: Partial<Record<PlatformProvider, BeatPlatformStatus>>;
+  released_at: string | null;
+  created_at: string;
+}
+
+export interface ApiError {
+  detail: string;
+  status: number;
+}

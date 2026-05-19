@@ -1,0 +1,21 @@
+node_modules
+dist
+dist-ssr
+*.local
+.vite
+.DS_Store
+.env
+.env.local
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# OS / shell crash dumps
+*.stackdump
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Claude Code local state
+.claude/

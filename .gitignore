@@ -1,0 +1,30 @@
+# Secrets & local config
+.env
+.env.*
+!.env.example
+*.local
+
+# Editor / IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+
+# Claude Code local state
+.claude/
+
+# OS / shell crash dumps
+*.stackdump
+
+# Logs
+*.log
+
+# Local databases / dumps
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.dump
+
+# Uploaded files & diagnostics
+storage/
