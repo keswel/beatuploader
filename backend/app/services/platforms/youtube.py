@@ -151,6 +151,26 @@ class YouTubeConnector(PlatformConnector):
             scopes=YOUTUBE_SCOPES,
         )
 
+    def _persist_refreshed_credentials(
+        self,
+        connection: PlatformConnection,
+        creds: Credentials,
+        original_access: str,
+        original_refresh: str | None,
+    ) -> None:
+        # google-auth mutates the Credentials object in place when it refreshes.
+        # Write any new values back so the DB doesn't keep a stale access token.
+        if creds.token and creds.token != original_access:
+            connection.access_token_encrypted = encrypt_token(creds.token)
+            expiry = creds.expiry
+            if expiry is not None:
+                # creds.expiry is naive UTC; the column is timezone-aware
+                connection.expires_at = (
+                    expiry.replace(tzinfo=UTC) if expiry.tzinfo is None else expiry
+                )
+        if creds.refresh_token and creds.refresh_token != original_refresh:
+            connection.refresh_token_encrypted = encrypt_token(creds.refresh_token)
+
     async def upload(
         self,
         connection: PlatformConnection,
@@ -159,6 +179,8 @@ class YouTubeConnector(PlatformConnector):
         meta: BeatMetadata,
     ) -> UploadHandle:
         creds = self._credentials(connection)
+        original_access = creds.token
+        original_refresh = creds.refresh_token
 
         def _do_upload() -> dict:
             # Build the YouTube client and perform a resumable upload.
@@ -197,6 +219,12 @@ class YouTubeConnector(PlatformConnector):
             response = await asyncio.to_thread(_do_upload)
         except HttpError as exc:
             raise RuntimeError(f"YouTube upload failed: {exc}") from exc
+        finally:
+            # Persist on failure too: the refresh itself may have succeeded
+            # before the upload errored, and we don't want to lose that token.
+            self._persist_refreshed_credentials(
+                connection, creds, original_access, original_refresh
+            )
 
         video_id = response["id"]
         return UploadHandle(
@@ -206,6 +234,8 @@ class YouTubeConnector(PlatformConnector):
 
     async def poll(self, connection: PlatformConnection, handle: UploadHandle) -> UploadProgress:
         creds = self._credentials(connection)
+        original_access = creds.token
+        original_refresh = creds.refresh_token
 
         def _check() -> dict:
             youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
@@ -221,6 +251,10 @@ class YouTubeConnector(PlatformConnector):
             item = await asyncio.to_thread(_check)
         except HttpError as exc:
             return UploadProgress(progress=0, status="failed", error=str(exc))
+        finally:
+            self._persist_refreshed_credentials(
+                connection, creds, original_access, original_refresh
+            )
 
         if not item:
             return UploadProgress(progress=0, status="failed", error="Video not found")

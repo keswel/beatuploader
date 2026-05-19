@@ -239,7 +239,6 @@ Beat
 
 - **No migrations** — `init_db()` does `create_all` on boot. Adding a column to an existing table is a no-op (Postgres/SQLite both); you have to drop the DB to apply. Wire Alembic before any breaking schema change in prod.
 - **No real worker queue** — `asyncio.create_task` lives in the process. Process crash = in-flight uploads lost. The `_in_flight` set holds references but only prevents GC; doesn't survive a restart.
-- **Token refresh isn't persisted** — Google's `Credentials` object auto-refreshes via the refresh_token, but the new access token isn't written back to the DB. After ~1h idle, next upload silently re-refreshes (fine) but DB holds stale access token. Add a refresh hook before production.
 - **BeatStars selectors can break anytime** — Angular CSS classes (`_ngcontent-ng-c*`) change every BeatStars deploy. We pin to `data-qa`, `data-cy`, IDs, and visible text. If something stops working, capture a diagnostic and check the selectors.
 - **Cropper / Uppy editor blocking** — both Uppy's built-in editor (`.uppy-DashboardContent-panel--editor`) and BeatStars's post-upload Cropper.js (`.cropper-modal`) intercept clicks. Always dismiss them before trying to click anything else. The artwork upload + license toggle paths both run `_close_cropper_if_open` defensively.
 - **Material slide-toggle clicks** — `mat-slide-toggle` wraps a hidden `<input role="switch">`. Clicking the wrapper through Playwright's `.click()` doesn't reliably register with Angular's change detection. Use `page.evaluate` to call `.click()` on the input directly. See `_enable_license`.
@@ -254,7 +253,6 @@ Ranked roughly by impact:
 - **BeatStars SMS 2FA interactive flow** — detection is in place; resolution is not. When BeatStars challenges us with SMS, we surface "asked for SMS verification" and stop. A real interactive flow would prompt the user for the code via the UI and submit it. Most users get past this by logging in once in their normal browser to clear the device challenge.
 - **More platforms** — SoundCloud (OAuth, easy), Spotify (via DistroKid), Audiomack (OAuth), Bandcamp (headless). All zero progress.
 - **Production deployment** — Dockerfile, hosted Postgres, R2/S3 for file storage, Vercel for frontend, OAuth redirect URI updates in Google Console. Required for Google verification.
-- **Token refresh persistence** — see above
 - **Real worker queue** — arq, RQ, or Celery
 - **Real progress reporting** — YouTube resumable upload has per-chunk callbacks. Wire them through to `job.targets[provider].progress`. BeatStars's Uppy emits progress events too — could capture via page eval.
 - **Alembic migrations** — required before any prod schema change
