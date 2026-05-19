@@ -19,6 +19,8 @@ class UploadCreate(BaseModel):
     license_type: str | None = Field(default="AUTO", max_length=32)
     # BeatStars genre — must match one of their known values (autocomplete-only)
     genre: str | None = Field(default=None, max_length=64)
+    # Per-upload YouTube description. If None, the user's template is rendered.
+    description: str | None = Field(default=None, max_length=5000)
 
 
 class UploadOut(BaseModel):

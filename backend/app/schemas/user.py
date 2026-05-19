@@ -21,6 +21,7 @@ class UserOut(BaseModel):
     email: EmailStr
     handle: str
     plan: str
+    youtube_description_template: str | None = None
     created_at: datetime
 
 
@@ -32,6 +33,8 @@ class Token(BaseModel):
 
 class UserUpdate(BaseModel):
     handle: str | None = Field(default=None, min_length=2, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
+    # Omit the key to leave unchanged. Include the key with null or "" to clear.
+    youtube_description_template: str | None = Field(default=None, max_length=5000)
 
 
 class PasswordChange(BaseModel):

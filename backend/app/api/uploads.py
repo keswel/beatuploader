@@ -66,13 +66,17 @@ async def create_upload(
         UploadFile | None,
         File(description="Cover art (PNG/JPG). Optional."),
     ] = None,
+    video: Annotated[
+        UploadFile | None,
+        File(description="Video file (MP4/MOV/WEBM). YouTube only. Optional."),
+    ] = None,
 ) -> UploadOut:
     payload = _parse_metadata(metadata)
 
     # At least one file must be present
     if (master is None or not master.filename) and (
         tagged is None or not tagged.filename
-    ) and (stems is None or not stems.filename):
+    ) and (stems is None or not stems.filename) and (video is None or not video.filename):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="At least one of master / tagged / stems must be provided",
@@ -94,6 +98,7 @@ async def create_upload(
         targets={t.value: {"status": "queued", "progress": 0} for t in payload.targets},
         license_type=payload.license_type,
         genre=payload.genre,
+        description=payload.description,
         payload_json=payload.model_dump(mode="json"),
     )
     db.add(job)
@@ -118,6 +123,10 @@ async def create_upload(
             artwork_path, w = await save_upload(user.id, job.id, artwork, role="artwork")
             job.artwork_storage_path = str(artwork_path)
             total_bytes += w
+        if video is not None and video.filename:
+            video_path, w = await save_upload(user.id, job.id, video, role="video")
+            job.video_storage_path = str(video_path)
+            total_bytes += w
     except HTTPException:
         # save_upload already raised an HTTP-friendly error (size/extension etc.).
         # Roll back any files that did save before the failure, drop the job.
@@ -126,6 +135,7 @@ async def create_upload(
             job.tagged_storage_path,
             job.stems_storage_path,
             job.artwork_storage_path,
+            job.video_storage_path,
         ):
             remove_upload(path)
         await db.delete(job)
@@ -246,6 +256,7 @@ async def delete_upload(upload_id: int, user: CurrentUser, db: DbSession) -> Non
         job.tagged_storage_path,
         job.stems_storage_path,
         job.artwork_storage_path,
+        job.video_storage_path,
     ):
         remove_upload(path)
     await db.delete(job)

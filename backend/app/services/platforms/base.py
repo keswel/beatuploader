@@ -59,10 +59,14 @@ class BeatMetadata:
     tagged_path: "Path | None" = None  # noqa: F821
     stems_path: "Path | None" = None  # noqa: F821
     artwork_path: "Path | None" = None  # noqa: F821 — cover art (PNG/JPG)
+    video_path: "Path | None" = None  # noqa: F821 — MP4/MOV/WEBM, YouTube only
     # 'AUTO' | 'EXCLUSIVE' | 'PREMIUM_PLUS' | 'PREMIUM' | 'UNLIMITED' | None
     license_type: str | None = None
     # User-picked genre label (e.g. "Hip Hop", "Trap"). Must match BeatStars's enum.
     genre: str | None = None
+    # Pre-rendered YouTube description. Job processor handles template substitution
+    # (including {beatstars_link}) before passing here.
+    description: str | None = None
 
 
 class PlatformConnector(ABC):

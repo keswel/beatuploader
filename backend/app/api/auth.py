@@ -98,6 +98,9 @@ async def update_me(
                 status_code=status.HTTP_409_CONFLICT, detail="Handle already taken"
             )
         user.handle = payload.handle
+    # Distinguish "field omitted" (leave alone) from "set to null/empty" (clear).
+    if "youtube_description_template" in payload.model_fields_set:
+        user.youtube_description_template = payload.youtube_description_template or None
     await db.commit()
     await db.refresh(user)
     return UserOut.model_validate(user)

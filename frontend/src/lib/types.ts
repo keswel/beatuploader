@@ -19,6 +19,7 @@ export interface User {
   email: string;
   handle: string;
   plan: string;
+  youtube_description_template: string | null;
   created_at: string;
 }
 
@@ -68,6 +69,7 @@ export interface UploadCreate {
   price_cents?: number;
   license_type?: LicenseType;
   genre?: string;
+  description?: string;  // per-upload YouTube description override
 }
 
 export interface UploadFiles {
@@ -77,6 +79,7 @@ export interface UploadFiles {
   master?: File;
   stems?: File;
   artwork?: File;  // cover art (PNG/JPG)
+  video?: File;    // MP4/MOV/WEBM, YouTube only
 }
 
 export interface BeatOut {

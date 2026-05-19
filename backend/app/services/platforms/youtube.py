@@ -182,6 +182,12 @@ class YouTubeConnector(PlatformConnector):
         original_access = creds.token
         original_refresh = creds.refresh_token
 
+        # Prefer a user-supplied video file. Falling back to audio works because
+        # YouTube accepts audio uploads (renders as a black-frame video), but the
+        # result is much better when the user provides a real video.
+        upload_file = meta.video_path or file_path
+        mimetype = _mimetype_for(upload_file)
+
         def _do_upload() -> dict:
             # Build the YouTube client and perform a resumable upload.
             youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
@@ -198,10 +204,10 @@ class YouTubeConnector(PlatformConnector):
                 },
             }
             media = MediaFileUpload(
-                str(file_path),
+                str(upload_file),
                 chunksize=1024 * 1024 * 4,
                 resumable=True,
-                mimetype="audio/mpeg",
+                mimetype=mimetype,
             )
             request = youtube.videos().insert(
                 part="snippet,status",
@@ -275,7 +281,31 @@ class YouTubeConnector(PlatformConnector):
         return UploadProgress(progress=50, status="uploading")
 
 
+_VIDEO_MIMETYPES: dict[str, str] = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+
+
+def _mimetype_for(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in _VIDEO_MIMETYPES:
+        return _VIDEO_MIMETYPES[ext]
+    # Audio fallback. YouTube accepts these and renders a black-frame video.
+    if ext == ".wav":
+        return "audio/wav"
+    if ext == ".flac":
+        return "audio/flac"
+    return "audio/mpeg"
+
+
 def _description(meta: BeatMetadata) -> str:
+    # Per-upload override (already rendered by jobs.py — placeholders substituted)
+    if meta.description:
+        return meta.description[:5000]
+    # Fallback: legacy BPM/Key/Tags blurb so empty descriptions don't look bare.
     parts: list[str] = []
     if meta.bpm:
         parts.append(f"BPM: {meta.bpm}")

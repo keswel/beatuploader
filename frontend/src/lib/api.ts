@@ -89,7 +89,10 @@ export const api = {
         auth: false,
       }),
     me: () => request<User>("/auth/me"),
-    updateMe: (payload: { handle?: string }) =>
+    updateMe: (payload: {
+      handle?: string;
+      youtube_description_template?: string | null;
+    }) =>
       request<User>("/auth/me", {
         method: "PATCH",
         body: JSON.stringify(payload),
@@ -140,6 +143,7 @@ export const api = {
       if (files.master) form.append("master", files.master);
       if (files.stems) form.append("stems", files.stems);
       if (files.artwork) form.append("artwork", files.artwork);
+      if (files.video) form.append("video", files.video);
       form.append("metadata", JSON.stringify(payload));
       return request<UploadOut>("/uploads", {
         method: "POST",

@@ -46,6 +46,15 @@ class UploadJob(Base):
     # Cover art path (PNG/JPG). Optional but improves listing appearance.
     artwork_storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
+    # Video file (MP4/MOV/WEBM) used by YouTube. Optional — if absent, YouTube
+    # falls back to the primary audio file (which YouTube renders as a black-frame video).
+    video_storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+    # Per-upload override for the YouTube description. If None, the user's
+    # template (User.youtube_description_template) is used, falling back to a
+    # built-in BPM/Key blurb.
+    description: Mapped[str | None] = mapped_column(String(5000), nullable=True)
+
     # Which platforms this upload targets, plus per-platform state
     targets: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(String(1024), nullable=True)

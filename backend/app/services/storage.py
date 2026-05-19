@@ -14,6 +14,7 @@ ROLE_LIMITS: dict[str, tuple[int, frozenset[str]]] = {
     "tagged":  (100 * 1024 * 1024, frozenset({".mp3"})),
     "stems":   (1024 * 1024 * 1024, frozenset({".zip", ".rar"})),  # stems can be big
     "artwork": (10 * 1024 * 1024,  frozenset({".png", ".jpg", ".jpeg", ".webp"})),
+    "video":   (2 * 1024 * 1024 * 1024, frozenset({".mp4", ".mov", ".webm", ".m4v"})),
 }
 
 

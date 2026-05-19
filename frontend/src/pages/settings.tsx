@@ -53,6 +53,10 @@ export function SettingsPage() {
             createdAt={user.created_at}
             onSaved={() => qc.invalidateQueries({ queryKey: ["auth", "me"] })}
           />
+          <YouTubeSection
+            template={user.youtube_description_template ?? ""}
+            onSaved={() => qc.invalidateQueries({ queryKey: ["auth", "me"] })}
+          />
           <SecuritySection />
           <IntegrationsSection
             connectedCount={connectedCount}
@@ -174,6 +178,83 @@ function AccountSection({
           >
             {save.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Save changes
+          </Button>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function YouTubeSection({
+  template: initialTemplate,
+  onSaved,
+}: {
+  template: string;
+  onSaved: () => void;
+}) {
+  const [template, setTemplate] = useState(initialTemplate);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const dirty = template !== initialTemplate;
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.auth.updateMe({
+        youtube_description_template: template || null,
+      }),
+    onSuccess: () => {
+      setError(null);
+      setSuccess(true);
+      onSaved();
+    },
+    onError: (err) => {
+      setError(err instanceof ApiError ? err.detail : "Couldn't save");
+      setSuccess(false);
+    },
+  });
+
+  return (
+    <Section
+      title="YouTube description template"
+      description="Default description for YouTube uploads. Override per-upload from the Upload page."
+    >
+      <div className="space-y-4">
+        <Field
+          label="Template"
+          hint="Placeholders: {title} {bpm} {key} {tags} {beatstars_link}. {beatstars_link} fills with the BeatStars URL after upload — leave blank if BeatStars isn't a target."
+        >
+          <textarea
+            placeholder={"Purchase: {beatstars_link}\nBPM: {bpm}  Key: {key}\n\n#typebeat #freebeat"}
+            value={template}
+            onChange={(e) => {
+              setTemplate(e.target.value);
+              setSuccess(false);
+            }}
+            rows={6}
+            className="flex w-full rounded-md border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-sm text-zinc-100 shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-600 focus:border-zinc-700 resize-y font-mono"
+          />
+        </Field>
+        {error && (
+          <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/50 rounded-md px-3 py-2">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="text-xs text-emerald-300 bg-emerald-950/30 border border-emerald-900/50 rounded-md px-3 py-2 flex items-center gap-2">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Template saved.
+          </div>
+        )}
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            disabled={!dirty || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Save template
           </Button>
         </div>
       </div>

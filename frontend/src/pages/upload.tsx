@@ -10,6 +10,7 @@ import {
   Plus,
   FileAudio,
   FileArchive,
+  FileVideo,
   ImageIcon,
   RotateCcw,
 } from "lucide-react";
@@ -30,13 +31,14 @@ import type {
   UploadStatus,
 } from "@/lib/types";
 
-type FileRole = "master" | "tagged" | "stems" | "artwork";
+type FileRole = "master" | "tagged" | "stems" | "artwork" | "video";
 
 interface PendingFiles {
   master: File | null;
   tagged: File | null;
   stems: File | null;
   artwork: File | null;
+  video: File | null;
 }
 
 interface Metadata {
@@ -47,6 +49,7 @@ interface Metadata {
   price: string;
   license_type: LicenseType;
   genre: string;
+  description: string;
 }
 
 const emptyFiles: PendingFiles = {
@@ -54,6 +57,7 @@ const emptyFiles: PendingFiles = {
   tagged: null,
   stems: null,
   artwork: null,
+  video: null,
 };
 const emptyMeta: Metadata = {
   title: "",
@@ -63,6 +67,7 @@ const emptyMeta: Metadata = {
   price: "",
   license_type: "AUTO",
   genre: "",
+  description: "",
 };
 
 // BeatStars's most common genres. Their input is autocomplete-only — typing
@@ -97,6 +102,14 @@ function classify(file: File): FileRole | null {
   }
   if (name.endsWith(".mp3")) return "tagged";
   if (name.endsWith(".zip") || name.endsWith(".rar")) return "stems";
+  if (
+    name.endsWith(".mp4") ||
+    name.endsWith(".mov") ||
+    name.endsWith(".webm") ||
+    name.endsWith(".m4v")
+  ) {
+    return "video";
+  }
   if (
     name.endsWith(".png") ||
     name.endsWith(".jpg") ||
@@ -160,7 +173,13 @@ export function UploadPage() {
       files,
       payload,
     }: {
-      files: { tagged: File; master?: File; stems?: File; artwork?: File };
+      files: {
+        tagged: File;
+        master?: File;
+        stems?: File;
+        artwork?: File;
+        video?: File;
+      };
       payload: Parameters<typeof api.uploads.create>[1];
     }) => api.uploads.create(files, payload),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["uploads"] }),
@@ -212,6 +231,7 @@ export function UploadPage() {
           tagged: files.tagged,
           stems: files.stems ?? undefined,
           artwork: files.artwork ?? undefined,
+          video: files.video ?? undefined,
         },
         payload: {
           filename: primary.name,
@@ -231,6 +251,7 @@ export function UploadPage() {
             : undefined,
           license_type: meta.license_type,
           genre: meta.genre || undefined,
+          description: meta.description || undefined,
         },
       });
       setFiles(emptyFiles);
@@ -244,10 +265,15 @@ export function UploadPage() {
     (files.master?.size ?? 0) +
     (files.tagged?.size ?? 0) +
     (files.stems?.size ?? 0) +
-    (files.artwork?.size ?? 0);
-  const fileCount = [files.master, files.tagged, files.stems, files.artwork].filter(
-    Boolean,
-  ).length;
+    (files.artwork?.size ?? 0) +
+    (files.video?.size ?? 0);
+  const fileCount = [
+    files.master,
+    files.tagged,
+    files.stems,
+    files.artwork,
+    files.video,
+  ].filter(Boolean).length;
 
   // BeatStars requires at least one tag. If BeatStars is a target, gate submit on tags.
   const parsedTags = meta.tags
@@ -324,13 +350,14 @@ export function UploadPage() {
                 We'll sort them: <span className="font-mono">.wav</span> → master,{" "}
                 <span className="font-mono">.mp3</span> → tagged,{" "}
                 <span className="font-mono">.zip/.rar</span> → stems,{" "}
-                <span className="font-mono">.png/.jpg</span> → artwork
+                <span className="font-mono">.png/.jpg</span> → artwork,{" "}
+                <span className="font-mono">.mp4/.mov</span> → video
               </div>
               <input
                 ref={inputRef}
                 type="file"
                 multiple
-                accept="audio/*,image/*,.zip,.rar"
+                accept="audio/*,image/*,video/*,.zip,.rar"
                 className="hidden"
                 onChange={(e) => e.target.files && addFiles(e.target.files)}
               />
@@ -354,7 +381,7 @@ export function UploadPage() {
               <div className="px-5 py-3.5 border-b border-zinc-800/60 flex items-center justify-between">
                 <div className="text-sm font-medium">Files</div>
                 <div className="text-xs text-zinc-500 tabular-nums">
-                  {fileCount} / 4 · {formatBytes(totalBytes)}
+                  {fileCount} / 5 · {formatBytes(totalBytes)}
                 </div>
               </div>
               <div className="divide-y divide-zinc-800/60">
@@ -386,6 +413,13 @@ export function UploadPage() {
                   hint="Optional. PNG/JPG/WebP. Recommended ≥1000×1000px."
                   file={files.artwork}
                   onClear={() => clearRole("artwork")}
+                />
+                <FileSlot
+                  role="video"
+                  label="Video (YouTube)"
+                  hint="Optional. MP4/MOV/WEBM. If omitted, the MP3 is used as audio-only."
+                  file={files.video}
+                  onClear={() => clearRole("video")}
                 />
               </div>
             </CardContent>
@@ -576,6 +610,24 @@ export function UploadPage() {
                       ?.hint}
                   </div>
                 </Field>
+                <Field label="YouTube description (optional)">
+                  <textarea
+                    placeholder="Leave blank to use your saved template from Settings"
+                    value={meta.description}
+                    onChange={(e) =>
+                      setMeta({ ...meta, description: e.target.value })
+                    }
+                    rows={4}
+                    className="flex w-full rounded-md border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-sm text-zinc-100 shadow-sm focus:outline-none focus:ring-1 focus:ring-zinc-600 focus:border-zinc-700 resize-y"
+                  />
+                  <div className="text-[10px] text-zinc-600 pt-1">
+                    Placeholders: <span className="font-mono">{"{title}"}</span>{" "}
+                    <span className="font-mono">{"{bpm}"}</span>{" "}
+                    <span className="font-mono">{"{key}"}</span>{" "}
+                    <span className="font-mono">{"{tags}"}</span>{" "}
+                    <span className="font-mono">{"{beatstars_link}"}</span>
+                  </div>
+                </Field>
               </div>
               <Button variant="outline" size="sm" className="w-full">
                 <Plus className="h-3.5 w-3.5" />
@@ -613,7 +665,9 @@ function FileSlot({ role, label, hint, required, file, onClear }: FileSlotProps)
       ? FileArchive
       : role === "artwork"
         ? ImageIcon
-        : FileAudio;
+        : role === "video"
+          ? FileVideo
+          : FileAudio;
   return (
     <div className="flex items-center gap-4 px-5 py-3.5">
       <div
