@@ -28,3 +28,6 @@
 
 # Uploaded files & diagnostics
 storage/
+
+# Local scratch / smoke scripts (not part of the test suite)
+backend/_smoke.py
