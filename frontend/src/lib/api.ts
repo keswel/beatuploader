@@ -115,6 +115,18 @@ export const api = {
         method: "POST",
         auth: false,
       }),
+    forgotPassword: (email: string) =>
+      request<{ status: string }>("/auth/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+        auth: false,
+      }),
+    resetPassword: (payload: { token: string; new_password: string }) =>
+      request<void>("/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        auth: false,
+      }),
   },
   platforms: {
     list: () => request<PlatformOut[]>("/platforms"),

@@ -45,6 +45,19 @@ class Settings(BaseSettings):
     # OAuth state JWT lifetime (security: short window between start and callback)
     oauth_state_expire_seconds: int = 600
 
+    # Password-reset link lifetime. Short on purpose — emailed links should be
+    # claimed quickly, not weeks later.
+    password_reset_expire_seconds: int = 1800  # 30 min
+
+    # Outbound email (used by password reset, future verification). If
+    # `smtp_host` is empty, EmailService logs the email to stdout instead of
+    # sending — fine for dev. Set all four in prod.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "Beatuploader <noreply@example.com>"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

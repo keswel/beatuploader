@@ -86,6 +86,16 @@ register_limiter = RateLimiter(max_requests=5, window_seconds=60, name="register
 password_change_limiter = RateLimiter(
     max_requests=5, window_seconds=60, name="password_change"
 )
+# Password reset request — tight because each call queues an outbound email and
+# is unauthenticated. Cap prevents using us as an email-bomb relay.
+password_reset_request_limiter = RateLimiter(
+    max_requests=3, window_seconds=300, name="password_reset_request"
+)
+# Reset confirm — looser because legitimate users may mistype a new password
+# before getting it past the complexity check.
+password_reset_confirm_limiter = RateLimiter(
+    max_requests=10, window_seconds=300, name="password_reset_confirm"
+)
 google_start_limiter = RateLimiter(
     max_requests=20, window_seconds=60, name="google_start"
 )

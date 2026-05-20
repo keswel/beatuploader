@@ -15,6 +15,8 @@ from app.models.user import User
 from app.schemas.user import (
     AccountDelete,
     PasswordChange,
+    PasswordResetConfirm,
+    PasswordResetRequest,
     Token,
     UserLogin,
     UserOut,
@@ -22,6 +24,7 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.security import create_access_token, hash_password, verify_password
+from app.services.email import send_email
 from app.services.google_signin import (
     authorize_url as google_authorize_url,
     exchange_code as google_exchange_code,
@@ -30,11 +33,18 @@ from app.services.google_signin import (
     verify_id_token as google_verify_id_token,
     verify_signin_state,
 )
+from app.services.password_reset import (
+    issue_reset_token,
+    reset_link,
+    verify_reset_token,
+)
 from app.services.rate_limit import (
     google_start_limiter,
     limit_dependency,
     login_limiter,
     password_change_limiter,
+    password_reset_confirm_limiter,
+    password_reset_request_limiter,
     register_limiter,
 )
 
@@ -184,6 +194,82 @@ async def delete_me(
         )
     # Cascade deletes platform connections, uploads, beats (configured in models)
     await db.delete(user)
+    await db.commit()
+
+
+@router.post(
+    "/forgot-password",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(limit_dependency(password_reset_request_limiter))],
+)
+async def forgot_password(payload: PasswordResetRequest, db: DbSession) -> dict:
+    """Email a password-reset link if the address belongs to a real user.
+
+    Response is the same whether the email exists or not — we don't want to
+    expose account-existence to anyone hitting this endpoint.
+    """
+    user = await db.scalar(select(User).where(User.email == payload.email))
+    # Only email if the account exists AND has a password (Google-only users
+    # don't have one to reset; they should re-sign-in via Google).
+    if user is not None and user.password_hash is not None:
+        settings = get_settings()
+        token = issue_reset_token(user.id)
+        link = reset_link(settings.frontend_base_url, token)
+        body = (
+            f"Hi {user.handle},\n\n"
+            f"Someone (hopefully you) asked to reset your Beatuploader password.\n"
+            f"Open this link within "
+            f"{settings.password_reset_expire_seconds // 60} minutes to choose a "
+            f"new one:\n\n{link}\n\n"
+            f"If it wasn't you, ignore this email — nothing has changed.\n"
+        )
+        # Don't await failure-loudly; send_email logs internally and returns.
+        await send_email(
+            to=user.email,
+            subject="Reset your Beatuploader password",
+            body=body,
+        )
+    return {"status": "ok"}
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(limit_dependency(password_reset_confirm_limiter))],
+)
+async def reset_password(payload: PasswordResetConfirm, db: DbSession) -> None:
+    """Consume a reset-token, set the new password, invalidate every JWT."""
+    try:
+        user_id, token_iat = verify_reset_token(payload.token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset link is invalid or has expired. Request a new one.",
+        ) from exc
+
+    user = await db.get(User, user_id)
+    if user is None:
+        # Account deleted between request and use. Don't disclose; clients see
+        # the same error either way.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset link is invalid or has expired. Request a new one.",
+        )
+
+    # Single-use enforcement: if the user already reset their password using
+    # this (or any) token, password_changed_at will have advanced past the
+    # token's iat. Rejecting here means each link works exactly once.
+    if (
+        user.password_changed_at is not None
+        and token_iat < user.password_changed_at.replace(microsecond=0)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset link has already been used. Request a new one.",
+        )
+
+    user.password_hash = hash_password(payload.new_password)
+    user.password_changed_at = datetime.now(UTC)
     await db.commit()
 
 

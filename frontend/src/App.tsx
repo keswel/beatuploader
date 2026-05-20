@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/components/layout";
 import { AuthGate } from "@/components/auth-gate";
 import { LoginPage } from "@/pages/login";
+import { ForgotPasswordPage } from "@/pages/forgot-password";
+import { ResetPasswordPage } from "@/pages/reset-password";
 import { GoogleCallbackPage } from "@/pages/google-callback";
 import { OverviewPage } from "@/pages/overview";
 import { UploadPage } from "@/pages/upload";
@@ -13,6 +15,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/auth/google" element={<GoogleCallbackPage />} />
       <Route element={<AuthGate />}>
         <Route element={<Layout />}>

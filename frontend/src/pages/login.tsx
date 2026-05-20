@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { Check, Disc3, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -154,7 +154,19 @@ export function LoginPage() {
           )}
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-zinc-400">Password</label>
+            <div className="flex items-baseline justify-between">
+              <label className="text-xs font-medium text-zinc-400">
+                Password
+              </label>
+              {mode === "login" && (
+                <Link
+                  to="/forgot-password"
+                  className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  Forgot password?
+                </Link>
+              )}
+            </div>
             <Input
               type="password"
               required

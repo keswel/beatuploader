@@ -86,3 +86,17 @@ class PasswordChange(BaseModel):
 class AccountDelete(BaseModel):
     # User must type their handle to confirm. Mismatch = 400.
     confirm_handle: str = Field(max_length=64)
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=1, max_length=2048)
+    new_password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_strength(cls, v: str) -> str:
+        return _validate_password(v)
