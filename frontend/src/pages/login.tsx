@@ -233,6 +233,16 @@ export function LoginPage() {
             </>
           )}
         </div>
+
+        <div className="mt-8 flex items-center justify-center gap-4 text-[10px] text-zinc-600">
+          <Link to="/privacy" className="hover:text-zinc-400 transition-colors">
+            Privacy
+          </Link>
+          <span className="text-zinc-800">·</span>
+          <Link to="/terms" className="hover:text-zinc-400 transition-colors">
+            Terms
+          </Link>
+        </div>
       </motion.div>
     </div>
   );

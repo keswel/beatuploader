@@ -10,6 +10,8 @@ import { UploadPage } from "@/pages/upload";
 import { PlatformsPage } from "@/pages/platforms";
 import { LibraryPage } from "@/pages/library";
 import { SettingsPage } from "@/pages/settings";
+import { PrivacyPage } from "@/pages/legal/privacy";
+import { TermsPage } from "@/pages/legal/terms";
 
 export default function App() {
   return (
@@ -18,6 +20,8 @@ export default function App() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/auth/google" element={<GoogleCallbackPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route element={<AuthGate />}>
         <Route element={<Layout />}>
           <Route index element={<OverviewPage />} />
