@@ -23,8 +23,10 @@ WORKDIR /app
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir -e .
 
-# Now the app itself.
+# Now the app itself. Include alembic so init_db() can run migrations at boot.
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
 
 # Storage volume mount point. Bind /app/storage to a persistent volume on the
 # host (Render disk, Fly volume, K8s PVC). Otherwise uploads and the BeatStars

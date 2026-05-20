@@ -38,7 +38,7 @@ npm run dev                                    # http://localhost:5173
 **First-time setup:**
 - Backend venv: `python -m venv .venv && .venv\Scripts\python.exe -m pip install -e .`
 - Playwright: `playwright install chromium` (~150MB)
-- DB: created automatically on first boot via `init_db()` (`create_all`)
+- DB: created/migrated automatically on first boot via `init_db()` (runs `alembic upgrade head`)
 
 **Current dev setup runs on port 8001**, not 8000 — hardcoded in `start-backend.ps1`. There's no `backend/.env` — the user is running on **all dev defaults**. `BACKEND_BASE_URL=http://localhost:8001` is needed for OAuth redirect URIs to line up; `frontend/.env.local` has `VITE_API_BASE=http://127.0.0.1:8001/api`. Why 8001 in the first place: Windows leaves zombie LISTENING entries on 8000 for many minutes after a hard kill. If you change the port, update `start-backend.ps1`, the env override, `frontend/.env.local`, and the Google Console redirect URIs together.
 
@@ -210,7 +210,7 @@ Beat
 - **Passwords** — bcrypt hashed via `security.py::hash_password`. Inputs truncated to 72 bytes (bcrypt's hard limit) before hashing/verifying. Direct bcrypt, NOT passlib (passlib's bcrypt backend is broken).
 - **Password policy** — enforced server-side in `schemas/user._validate_password` (used by `UserRegister.password` and `PasswordChange.new_password`): 8–128 chars, with uppercase, lowercase, digit, and special character. Frontend mirror in `lib/password.ts` powers the inline checklist on register + change-password forms. **Login does NOT re-enforce** complexity (existing weaker passwords must still authenticate) but caps length at 128 chars to prevent oversized-payload DoS.
 - **Constant-time login** — `api/auth.login` always runs `verify_password` against either the real hash or a `_DUMMY_PASSWORD_HASH` baked at import. Equalizes timing between the user-exists and user-doesn't branches → no timing-side-channel email enumeration.
-- **JWT revocation on password change** — `User.password_changed_at` stamps every register + change-password. `deps.get_current_user` rejects any token whose `iat` predates that stamp. Practical effect: changing your password logs out every other session within the next request. Caveat: requires the `password_changed_at` column. In dev SQLite, **drop `backend/beatuploader.db`** to let `init_db()` recreate the schema; in prod, wire Alembic before any further schema work.
+- **JWT revocation on password change** — `User.password_changed_at` stamps every register + change-password. `deps.get_current_user` rejects any token whose `iat` predates that stamp. Practical effect: changing your password logs out every other session within the next request. The column is part of the baseline Alembic migration, so fresh DBs already have it.
 - **Rate limiting** — in-memory sliding-window limiter in `services/rate_limit.py`. Wired on `/auth/login` (10/min), `/auth/register` (5/min), `/auth/change-password` (5/min), `/auth/google/start` (20/min), `/platforms/beatstars/credentials` (3/min), `/platforms/beatstars/sms` (5/min). Per-IP. **Single-process only** — for multi-worker deploys, swap for a Redis-backed limiter (e.g. `slowapi + limits`). Behind a reverse proxy, run uvicorn with `--proxy-headers` so `request.client.host` reflects the real source.
 - **Security headers** — `main.SecurityHeadersMiddleware` applies `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy` denying geo/mic/cam/usb/payment. HSTS (`max-age=31536000; includeSubDomains`) is added only when `DEBUG=false` so it doesn't pin dev's plaintext `http://localhost`.
 - **Platform tokens** — encrypted at rest with Fernet (`security.py::encrypt_token`). The Fernet instance reads `TOKEN_ENCRYPTION_KEY` directly — **no silent padding/derivation**. Pre-this-audit code derived keys from short strings, which is dangerous; that's been removed. `decrypt_token` wraps any failure in a clean `RuntimeError` so we don't leak crypto internals.
@@ -254,7 +254,7 @@ Beat
 
 ## Pitfalls
 
-- **No migrations** — `init_db()` does `create_all` on boot. Adding a column to an existing table is a no-op (Postgres/SQLite both); you have to drop the DB to apply. Wire Alembic before any breaking schema change in prod.
+- **Alembic single-writer assumption** — `init_db()` runs `alembic upgrade head` on every app boot. The Dockerfile uses one uvicorn worker, so that's safe. If you scale to multiple workers/instances, move migrations into a one-shot pre-deploy job — otherwise N workers race for the same advisory lock on startup.
 - **No real worker queue** — `asyncio.create_task` lives in the process. Process crash = in-flight uploads lost. The `_in_flight` set holds references but only prevents GC; doesn't survive a restart.
 - **BeatStars selectors can break anytime** — Angular CSS classes (`_ngcontent-ng-c*`) change every BeatStars deploy. We pin to `data-qa`, `data-cy`, IDs, and visible text. If something stops working, capture a diagnostic and check the selectors.
 - **Cropper / Uppy editor blocking** — both Uppy's built-in editor (`.uppy-DashboardContent-panel--editor`) and BeatStars's post-upload Cropper.js (`.cropper-modal`) intercept clicks. Always dismiss them before trying to click anything else. The artwork upload + license toggle paths both run `_close_cropper_if_open` defensively.
@@ -274,7 +274,7 @@ Ranked roughly by impact:
 - **Production deployment** — Dockerfile, hosted Postgres, R2/S3 for file storage, Vercel for frontend, OAuth redirect URI updates in Google Console. Required for Google verification.
 - **Real worker queue** — arq, RQ, or Celery
 - **Real progress reporting** — YouTube resumable upload has per-chunk callbacks. Wire them through to `job.targets[provider].progress`. BeatStars's Uppy emits progress events too — could capture via page eval.
-- **Alembic migrations** — required before any prod schema change. The `password_changed_at` column added during the security pass currently relies on `create_all` (= drop dev DB to apply). Wire Alembic before any further schema work.
+- **Multi-worker migration safety** — once we move past single-worker uvicorn, the `init_db() → alembic upgrade head` on every boot becomes a stampede. Move migrations into a pre-deploy job at that point.
 - **HttpOnly cookie sessions** — token is in `localStorage`, vulnerable to XSS exfiltration. Move to HttpOnly+Secure+SameSite cookies if/when we accept user-rendered HTML or third-party scripts.
 - **Email** (transactional) — verification, password reset, "your upload is live"
 - **Stripe / billing** — `User.plan` exists but is just a string

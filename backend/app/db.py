@@ -36,8 +36,25 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Create tables. Replace with Alembic migrations for prod."""
-    from app.models import beat, platform, upload, user  # noqa: F401
+    """Run pending Alembic migrations against the configured database.
+
+    Idempotent: re-running on an already-current DB is a no-op. We run on every
+    boot because the Dockerfile is single-worker — for multi-worker deploys,
+    move this out of startup and into a one-shot job (otherwise every worker
+    races to grab the alembic version lock).
+    """
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        # Hand alembic the sync facade of our async connection. env.py picks it
+        # up from cfg.attributes["connection"] and skips opening its own engine.
+        def _upgrade(sync_conn) -> None:
+            cfg.attributes["connection"] = sync_conn
+            command.upgrade(cfg, "head")
+
+        await conn.run_sync(_upgrade)
