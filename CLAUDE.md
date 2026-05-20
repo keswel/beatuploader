@@ -12,17 +12,27 @@ beatuploader/
 
 Frontend talks to backend via `/api/*` over JSON (multipart for uploads). Auth is JWT Bearer in `Authorization` header, token in `localStorage`.
 
+## What works today
+
+- **YouTube** — OAuth connect + auto-upload of the master/tagged audio as an unlisted video. Token auto-refresh persists the new access token back to the DB (`7825e32`). End-to-end working.
+- **BeatStars** — headless login (Playwright), interactive SMS 2FA when challenged, end-to-end upload incl. cover art + license picking + price + publish. Session reused across uploads.
+- **SoundCloud** — registry stub, raises `NotImplementedError`. Intentionally deferred.
+- **Spotify / Audiomack / Bandcamp** — enum entries only, no connector files yet.
+
 ## Run dev
 
+Easiest: from repo root, `./start.ps1` spawns both servers in separate PowerShell windows and gives you a `restart` / `kill` prompt in the parent. See `start-backend.ps1` (uvicorn on **port 8001**) and `start-frontend.ps1` (Vite). Closing the parent terminal triggers the `finally` block which kills both.
+
+Manual:
 ```powershell
 # Backend
 cd backend
 .venv\Scripts\activate
-uvicorn app.main:app --reload          # http://localhost:8000  (docs at /docs)
+uvicorn app.main:app --reload --port 8001     # http://localhost:8001  (docs at /docs)
 
 # Frontend
 cd frontend
-npm run dev                            # http://localhost:5173
+npm run dev                                    # http://localhost:5173
 ```
 
 **First-time setup:**
@@ -30,7 +40,7 @@ npm run dev                            # http://localhost:5173
 - Playwright: `playwright install chromium` (~150MB)
 - DB: created automatically on first boot via `init_db()` (`create_all`)
 
-**Current dev setup runs on port 8001**, not 8000. There's no `backend/.env` — the user is running on **all dev defaults**. Backend launched with `BACKEND_BASE_URL=http://localhost:8001` env override; `frontend/.env.local` has `VITE_API_BASE=http://127.0.0.1:8001/api`. Why: Windows leaves zombie LISTENING entries on port 8000 after a hard kill that survive for many minutes; 8001 was a workaround. If 8000 is free, prefer it.
+**Current dev setup runs on port 8001**, not 8000 — hardcoded in `start-backend.ps1`. There's no `backend/.env` — the user is running on **all dev defaults**. `BACKEND_BASE_URL=http://localhost:8001` is needed for OAuth redirect URIs to line up; `frontend/.env.local` has `VITE_API_BASE=http://127.0.0.1:8001/api`. Why 8001 in the first place: Windows leaves zombie LISTENING entries on 8000 for many minutes after a hard kill. If you change the port, update `start-backend.ps1`, the env override, `frontend/.env.local`, and the Google Console redirect URIs together.
 
 **To set up real secrets** before deploying or going to prod mode:
 ```powershell
@@ -130,7 +140,7 @@ The hardest integration and the product's differentiator. Lives in `services/pla
 **Auth flow** (`_do_login`):
 - Two-step: email page (`#oath-email`) → click Continue → password page (`#userPassword`) → click Continue
 - BeatStars redirects unknown emails to `/sign-up` — we detect this and surface "No BeatStars account found"
-- SMS 2FA: when BeatStars triggers it (new device, suspicious IP), we detect `/verify`-style URLs OR known body text patterns and raise. **Not yet automated** — user has to log into BeatStars in their normal browser once to clear the challenge, then retry from our side. Detection live; interactive resolution TODO.
+- SMS 2FA: when BeatStars triggers it (new device, suspicious IP), we detect `/verify`-style URLs OR known body text patterns. Resolution is interactive: `_do_login` accepts an `SmsHandler` (callbacks for `on_detected` + blocking `get_code`). The credentials endpoint races the worker task against the SMS event; on detection it returns `{status: "sms_required", challenge_id}` while the worker thread parks at the verify page (browser stays open). The frontend prompts for the 6-digit code; `POST /api/platforms/beatstars/sms` puts it on the challenge's `queue.Queue`, the worker submits it, and the SMS endpoint awaits the worker task to finish persisting the session. In-memory challenge store with 10-min TTL (`services/platforms/_challenges.py`). The 5-min `queue.get` timeout is what actually closes the browser if the user walks away.
 - Login success = URL leaves `oauth.beatstars.com` for any other `beatstars.com` subdomain (homepage `www.beatstars.com` counts).
 
 **Upload flow** (`_do_upload`):
@@ -198,14 +208,21 @@ Beat
 ## Security model
 
 - **Passwords** — bcrypt hashed via `security.py::hash_password`. Inputs truncated to 72 bytes (bcrypt's hard limit) before hashing/verifying. Direct bcrypt, NOT passlib (passlib's bcrypt backend is broken).
+- **Password policy** — enforced server-side in `schemas/user._validate_password` (used by `UserRegister.password` and `PasswordChange.new_password`): 8–128 chars, with uppercase, lowercase, digit, and special character. Frontend mirror in `lib/password.ts` powers the inline checklist on register + change-password forms. **Login does NOT re-enforce** complexity (existing weaker passwords must still authenticate) but caps length at 128 chars to prevent oversized-payload DoS.
+- **Constant-time login** — `api/auth.login` always runs `verify_password` against either the real hash or a `_DUMMY_PASSWORD_HASH` baked at import. Equalizes timing between the user-exists and user-doesn't branches → no timing-side-channel email enumeration.
+- **JWT revocation on password change** — `User.password_changed_at` stamps every register + change-password. `deps.get_current_user` rejects any token whose `iat` predates that stamp. Practical effect: changing your password logs out every other session within the next request. Caveat: requires the `password_changed_at` column. In dev SQLite, **drop `backend/beatuploader.db`** to let `init_db()` recreate the schema; in prod, wire Alembic before any further schema work.
+- **Rate limiting** — in-memory sliding-window limiter in `services/rate_limit.py`. Wired on `/auth/login` (10/min), `/auth/register` (5/min), `/auth/change-password` (5/min), `/auth/google/start` (20/min), `/platforms/beatstars/credentials` (3/min), `/platforms/beatstars/sms` (5/min). Per-IP. **Single-process only** — for multi-worker deploys, swap for a Redis-backed limiter (e.g. `slowapi + limits`). Behind a reverse proxy, run uvicorn with `--proxy-headers` so `request.client.host` reflects the real source.
+- **Security headers** — `main.SecurityHeadersMiddleware` applies `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy` denying geo/mic/cam/usb/payment. HSTS (`max-age=31536000; includeSubDomains`) is added only when `DEBUG=false` so it doesn't pin dev's plaintext `http://localhost`.
 - **Platform tokens** — encrypted at rest with Fernet (`security.py::encrypt_token`). The Fernet instance reads `TOKEN_ENCRYPTION_KEY` directly — **no silent padding/derivation**. Pre-this-audit code derived keys from short strings, which is dangerous; that's been removed. `decrypt_token` wraps any failure in a clean `RuntimeError` so we don't leak crypto internals.
 - **Secret validation** — `config.py::_validate_secrets` runs at startup. In `DEBUG=true` (default) it warns; in `DEBUG=false` (prod) it raises if `JWT_SECRET` is the dev default, `< 32` chars, or `TOKEN_ENCRYPTION_KEY` isn't a valid Fernet key.
 - **Error responses** — never expose raw exception text to clients. All OAuth callback/save/retry paths log the full exception server-side via `log.exception(...)` and return a generic message.
-- **File uploads** — extension allowlist + per-role size limit enforced in `services/storage.py::save_upload`. Streams to disk with a running byte count; aborts mid-stream and cleans up the partial file if over the limit.
-- **JWT** — HS256, 7-day expiry. Subject claim is the user ID (int). State JWTs for OAuth are signed with the same secret but carry a `purpose` field to distinguish sign-in from platform-connect.
+- **File uploads** — extension allowlist + per-role size limit enforced in `services/storage.py::save_upload`. Streams to disk with a running byte count; aborts mid-stream and cleans up the partial file if over the limit. Filename sanitization (`isalnum() or in "._- "`) blocks path traversal in the on-disk filename.
+- **Schema length caps** — all user-controlled string fields have explicit `max_length` (notably `BeatStarsCredentials.username`/`password`, `BeatStarsSmsSubmit.code`, `UserLogin.password`, `AccountDelete.confirm_handle`, OAuth `code`/`state` query params). Prevents oversized-payload DoS before any heavy work (bcrypt, Playwright, etc.).
+- **JWT** — HS256, 7-day expiry. Subject claim is the user ID (int). `iat` (issued-at) is load-bearing for the password-change revocation check above — don't strip it. State JWTs for OAuth are signed with the same secret but carry a `purpose` field to distinguish sign-in from platform-connect.
 - **Token in URL fragment** (Google sign-in callback redirect) — fragments don't hit server logs (HTTP spec). Browser history is the only risk.
-- **CORS** — `cors_origins` env var, comma-separated. Default localhost.
-- **CSRF** — not applicable (Bearer JWT, not cookies).
+- **Token in `localStorage`** — known tradeoff: simpler than HttpOnly cookies but exfiltrable by any XSS. Mitigated by React's default escaping and zero `dangerouslySetInnerHTML` in the codebase. Revisit if we ever add user-rendered HTML or third-party scripts.
+- **CORS** — `cors_origins` env var, comma-separated. Default localhost. **For prod: set explicitly** to the exact frontend origin(s); never use `*` with `allow_credentials=True`.
+- **CSRF** — not applicable for the API (Bearer JWT, not cookies). OAuth state JWT (`purpose` + nonce + short `exp`) acts as the CSRF token for the redirect flows.
 - **`PlatformOut` schema** — never exposes `*_encrypted` fields. Verified.
 - **Diagnostics screenshots** — captured to `./storage/diagnostics/`. `storage/` is in `.gitignore`. These contain BeatStars's logged-in DOM; treat as sensitive.
 
@@ -250,15 +267,18 @@ Beat
 
 Ranked roughly by impact:
 
-- **BeatStars SMS 2FA interactive flow** — detection is in place; resolution is not. When BeatStars challenges us with SMS, we surface "asked for SMS verification" and stop. A real interactive flow would prompt the user for the code via the UI and submit it. Most users get past this by logging in once in their normal browser to clear the device challenge.
+- **BeatStars SMS 2FA selector verification** — the interactive flow is built end-to-end (challenge store + `SmsHandler` callbacks into `_do_login` + two-stage frontend dialog). Selectors for the SMS code input (`input[autocomplete="one-time-code"]`, `input[name="code"]`, etc.) and submit button are best-guesses since the 2FA page only renders when BeatStars actually challenges us. On the first real challenge, the worker writes a `sms-*.html` diagnostic — use it to tighten `SMS_CODE_INPUT_SELECTORS` / `SMS_SUBMIT_SELECTORS` in `services/platforms/beatstars.py`.
+- **Redis-backed rate limiter** — current limiter is in-memory and per-process. Fine for the single-uvicorn-worker MVP; not safe for multi-worker or multi-instance prod. Swap for `slowapi + limits` with a Redis storage backend before scaling out.
+- **Reverse-proxy IP handling** — rate limiter keys off `request.client.host`. Behind a proxy (Nginx, Cloudflare, etc.) you must run uvicorn with `--proxy-headers` (or `--forwarded-allow-ips`) so that's the real client and not the proxy. Otherwise every request looks like one IP and the limits become global.
 - **More platforms** — SoundCloud (OAuth, easy), Spotify (via DistroKid), Audiomack (OAuth), Bandcamp (headless). All zero progress.
 - **Production deployment** — Dockerfile, hosted Postgres, R2/S3 for file storage, Vercel for frontend, OAuth redirect URI updates in Google Console. Required for Google verification.
 - **Real worker queue** — arq, RQ, or Celery
 - **Real progress reporting** — YouTube resumable upload has per-chunk callbacks. Wire them through to `job.targets[provider].progress`. BeatStars's Uppy emits progress events too — could capture via page eval.
-- **Alembic migrations** — required before any prod schema change
+- **Alembic migrations** — required before any prod schema change. The `password_changed_at` column added during the security pass currently relies on `create_all` (= drop dev DB to apply). Wire Alembic before any further schema work.
+- **HttpOnly cookie sessions** — token is in `localStorage`, vulnerable to XSS exfiltration. Move to HttpOnly+Secure+SameSite cookies if/when we accept user-rendered HTML or third-party scripts.
 - **Email** (transactional) — verification, password reset, "your upload is live"
 - **Stripe / billing** — `User.plan` exists but is just a string
-- **Tests** — pytest+pytest-asyncio installed; zero tests written. Start with auth happy path + upload pipeline.
+- **Tests** — pytest+pytest-asyncio installed; zero tests written. Start with auth happy path + upload pipeline + password validator.
 - **OAuth provider verification (Google)** — required before non-test-users can use YouTube. 4–6 week process.
 - **Mobile UX pass** — desktop-first; sidebar hides at `md:` but upload page is cramped on phones
 

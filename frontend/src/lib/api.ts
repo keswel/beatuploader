@@ -126,13 +126,25 @@ export const api = {
     disconnect: (provider: PlatformProvider) =>
       request<void>(`/platforms/${provider}`, { method: "DELETE" }),
     beatstarsCredentials: (payload: { username: string; password: string }) =>
-      request<{ status: string; account_label: string }>(
-        "/platforms/beatstars/credentials",
+      request<
+        | { status: "connected"; account_label: string }
+        | { status: "sms_required"; challenge_id: string; hint: string }
+      >("/platforms/beatstars/credentials", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    beatstarsSms: (payload: { challenge_id: string; code: string }) =>
+      request<{ status: "connected"; account_label: string }>(
+        "/platforms/beatstars/sms",
         {
           method: "POST",
           body: JSON.stringify(payload),
         },
       ),
+    beatstarsSmsCancel: (challenge_id: string) =>
+      request<void>(`/platforms/beatstars/sms/${challenge_id}`, {
+        method: "DELETE",
+      }),
   },
   uploads: {
     list: () => request<UploadOut[]>("/uploads"),

@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -39,6 +40,24 @@ async def get_current_user(
     user = await db.get(User, user_id_int)
     if user is None:
         raise credentials_exc
+
+    # Password-change revocation: any JWT issued before the user's most recent
+    # password change is invalid. Uses iat (issued-at) from the token vs.
+    # password_changed_at on the user row.
+    if user.password_changed_at is not None:
+        iat = payload.get("iat")
+        # iat from python-jose comes back as int (seconds since epoch).
+        if iat is None:
+            raise credentials_exc
+        try:
+            iat_dt = datetime.fromtimestamp(int(iat), tz=UTC)
+        except (TypeError, ValueError, OSError) as exc:
+            raise credentials_exc from exc
+        # Allow 1s slack to absorb sub-second clock differences when a token
+        # is issued in the same request that sets password_changed_at.
+        if iat_dt < user.password_changed_at.replace(microsecond=0):
+            raise credentials_exc
+
     return user
 
 

@@ -13,6 +13,12 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(254), unique=True, index=True)
     handle: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Timestamp of the most recent password change. JWTs issued before this
+    # moment are rejected (see deps.get_current_user). Nullable so existing
+    # rows pre-this-column remain valid; on next password change it gets set.
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     google_sub: Mapped[str | None] = mapped_column(
         String(64), unique=True, nullable=True, index=True
     )

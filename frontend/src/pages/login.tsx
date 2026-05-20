@@ -1,11 +1,16 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
-import { Disc3, Loader2 } from "lucide-react";
+import { Check, Disc3, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
+import {
+  PASSWORD_MIN_LENGTH,
+  checkPassword,
+  isPasswordValid,
+} from "@/lib/password";
 
 type Mode = "login" | "register";
 
@@ -37,9 +42,16 @@ export function LoginPage() {
     return <Navigate to="/" replace />;
   }
 
+  const passwordChecks = useMemo(() => checkPassword(password), [password]);
+  const passwordOk = useMemo(() => isPasswordValid(password), [password]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (mode === "register" && !passwordOk) {
+      setError("Your password doesn't meet the requirements below.");
+      return;
+    }
     setSubmitting(true);
     try {
       if (mode === "login") {
@@ -146,12 +158,15 @@ export function LoginPage() {
             <Input
               type="password"
               required
-              minLength={8}
+              minLength={PASSWORD_MIN_LENGTH}
               autoComplete={mode === "login" ? "current-password" : "new-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
             />
+            {mode === "register" && password.length > 0 && (
+              <PasswordChecklist checks={passwordChecks} />
+            )}
           </div>
 
           {error && (
@@ -164,7 +179,11 @@ export function LoginPage() {
             </motion.div>
           )}
 
-            <Button type="submit" className="w-full" disabled={submitting}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={submitting || (mode === "register" && !passwordOk)}
+            >
               {submitting ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -204,6 +223,39 @@ export function LoginPage() {
         </div>
       </motion.div>
     </div>
+  );
+}
+
+function PasswordChecklist({
+  checks,
+}: {
+  checks: ReturnType<typeof checkPassword>;
+}) {
+  const items: { ok: boolean; label: string }[] = [
+    { ok: checks.length, label: `${PASSWORD_MIN_LENGTH}+ characters` },
+    { ok: checks.upper, label: "Uppercase letter" },
+    { ok: checks.lower, label: "Lowercase letter" },
+    { ok: checks.digit, label: "Number" },
+    { ok: checks.special, label: "Special character" },
+  ];
+  return (
+    <ul className="grid grid-cols-2 gap-x-3 gap-y-1 pt-2 text-[10px]">
+      {items.map((it) => (
+        <li
+          key={it.label}
+          className={`flex items-center gap-1.5 ${
+            it.ok ? "text-emerald-400" : "text-zinc-500"
+          }`}
+        >
+          {it.ok ? (
+            <Check className="h-3 w-3" />
+          ) : (
+            <X className="h-3 w-3" />
+          )}
+          {it.label}
+        </li>
+      ))}
+    </ul>
   );
 }
 

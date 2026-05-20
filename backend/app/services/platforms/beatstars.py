@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -240,6 +241,46 @@ SMS_TEXT_HINTS = (
 )
 
 
+# SMS-code form selectors. BeatStars's exact markup isn't pinned (their 2FA UI
+# only appears when their fraud system challenges us), so we try a few common
+# patterns. If a real challenge doesn't resolve, capture the diagnostic HTML and
+# tighten these to match.
+SMS_CODE_INPUT_SELECTORS = (
+    'input[autocomplete="one-time-code"]',
+    'input[name="code"]',
+    'input[name="verification_code"]',
+    'input[name="otp"]',
+    'input[name="verificationCode"]',
+    "#code",
+    "#verification_code",
+    "#otp",
+    'input.code-input',
+    'input[type="text"][maxlength="6"]',
+    'input[type="tel"][maxlength="6"]',
+)
+SMS_SUBMIT_SELECTORS = (
+    'button[type="submit"]:has-text("Verify")',
+    'button[type="submit"]:has-text("Continue")',
+    'button[type="submit"]:has-text("Submit")',
+    'button[type="submit"]:has-text("Confirm")',
+    'button:has-text("Verify")',
+    'button:has-text("Continue")',
+    'button[type="submit"]',
+)
+
+
+@dataclass
+class SmsHandler:
+    """Callbacks the API layer hands to _do_login so it can pause for a code."""
+
+    on_detected: Callable[[str | None], None]  # called once when SMS is detected
+    get_code: Callable[[], str | None]  # blocks; returns None to cancel
+
+
+class SmsCancelled(RuntimeError):
+    """Raised when the user cancels (or times out) the SMS challenge."""
+
+
 def _detect_login_outcome(page: Page) -> str:
     """Return 'success' | 'bad_credentials' | 'sms' | 'captcha' | 'unknown'.
 
@@ -318,12 +359,103 @@ def _read_account_label(page: Page) -> str | None:
     return None
 
 
-def _do_login(username: str, password: str) -> LoginResult:
+def _submit_sms_code(page: Page, code: str) -> None:
+    """Type the SMS code into BeatStars's verification form and submit.
+
+    Tries a single-input pattern first (the most common form), falling back to
+    a 6-cell digit-per-input pattern. Raises RuntimeError if neither matches —
+    the caller should treat that as "selectors out of date, capture a diagnostic".
+    """
+    code = code.strip()
+    filled = False
+
+    for sel in SMS_CODE_INPUT_SELECTORS:
+        try:
+            el = page.query_selector(sel)
+            if el is None:
+                continue
+            if not el.is_visible():
+                continue
+            el.fill(code)
+            filled = True
+            break
+        except Exception:  # noqa: BLE001
+            continue
+
+    if not filled:
+        # Try the digit-per-input pattern. BeatStars might use 6 inputs that
+        # auto-advance on input.
+        try:
+            inputs = page.query_selector_all('input[maxlength="1"]')
+            visible = [i for i in inputs if i.is_visible()]
+            if len(visible) >= 6 and len(code) == 6:
+                for i, ch in zip(visible[:6], code):
+                    i.fill(ch)
+                filled = True
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not filled:
+        raise RuntimeError(
+            "Couldn't locate the BeatStars SMS code input field. "
+            "Selectors may need updating — check ./storage/diagnostics/sms-*.html."
+        )
+
+    # Submit. Some forms auto-submit on the 6th digit; we still click in case.
+    for sel in SMS_SUBMIT_SELECTORS:
+        try:
+            btn = page.query_selector(sel)
+            if btn is None:
+                continue
+            if not btn.is_visible() or not btn.is_enabled():
+                continue
+            btn.click()
+            break
+        except Exception:  # noqa: BLE001
+            continue
+
+    # Wait for either a redirect off the auth subdomain or a re-render of the
+    # form (e.g. with an error). Best-effort: ignore timeouts and let the
+    # outcome detector make the call.
+    try:
+        page.wait_for_load_state("networkidle", timeout=TIMEOUT_NAV)
+    except PlaywrightTimeoutError:
+        pass
+
+
+def _read_sms_hint(page: Page) -> str | None:
+    """Pull a short user-friendly hint from the SMS page (e.g. masked phone number)."""
+    try:
+        body = (page.inner_text("body") or "").strip()
+    except Exception:  # noqa: BLE001
+        return None
+    # Look for the line that mentions "code" — usually contains the phone hint
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or len(line) > 200:
+            continue
+        lower = line.lower()
+        if any(h in lower for h in ("code", "verification", "we sent", "we've sent")):
+            return line
+    return None
+
+
+def _do_login(
+    username: str,
+    password: str,
+    *,
+    sms_handler: SmsHandler | None = None,
+) -> LoginResult:
     """Sync — meant to be wrapped in asyncio.to_thread.
 
     BeatStars uses a two-step OAuth-style login:
       1. Page 1: email input + Continue button
       2. Page 2: password input + Continue button
+
+    If BeatStars challenges us with SMS 2FA and ``sms_handler`` is provided, we
+    call ``on_detected`` (giving the API endpoint a chance to return a
+    challenge_id to the user) and block on ``get_code`` until the user
+    submits the code. With no handler we raise immediately.
     """
     with browser_session() as (_, context):
         page = context.new_page()
@@ -378,11 +510,34 @@ def _do_login(username: str, password: str) -> LoginResult:
         outcome = _detect_login_outcome(page)
         if outcome == "sms":
             diag = _capture_diagnostic(page, label="sms")
-            raise RuntimeError(
-                "BeatStars is asking for an SMS verification code. We don't have the "
-                "interactive code-entry flow built yet (next step). "
-                f"Diagnostic of the SMS page: {diag}"
-            )
+            log.info("BeatStars SMS challenge detected: %s", diag)
+            if sms_handler is None:
+                raise RuntimeError(
+                    "BeatStars is asking for an SMS verification code, but no "
+                    "handler was provided to relay it. "
+                    f"Diagnostic: {diag}"
+                )
+            hint = _read_sms_hint(page)
+            sms_handler.on_detected(hint)
+
+            code = sms_handler.get_code()
+            if code is None or not code.strip():
+                raise SmsCancelled("SMS challenge was cancelled or timed out")
+
+            try:
+                _submit_sms_code(page, code)
+            except RuntimeError as exc:
+                _capture_diagnostic(page, label="sms-submit-fail")
+                raise RuntimeError(str(exc)) from exc
+
+            # Re-evaluate: success, still SMS (wrong code), or other failure.
+            outcome = _detect_login_outcome(page)
+            if outcome == "sms":
+                _capture_diagnostic(page, label="sms-rejected")
+                raise RuntimeError(
+                    "BeatStars rejected the verification code (or it expired). "
+                    "Try connecting again to get a fresh code."
+                )
         if outcome == "bad_credentials":
             diag = _capture_diagnostic(page, label="bad-creds")
             raise RuntimeError(f"Wrong BeatStars email or password (diagnostic: {diag})")
@@ -931,9 +1086,15 @@ class BeatStarsConnector(PlatformConnector):
         return None
 
     async def login_and_capture_session(
-        self, *, username: str, password: str
+        self,
+        *,
+        username: str,
+        password: str,
+        sms_handler: SmsHandler | None = None,
     ) -> LoginResult:
-        return await asyncio.to_thread(_do_login, username, password)
+        return await asyncio.to_thread(
+            _do_login, username, password, sms_handler=sms_handler
+        )
 
     async def upload(
         self,
@@ -991,11 +1152,20 @@ class BeatStarsConnector(PlatformConnector):
 
 
 async def connect_with_credentials(
-    *, username: str, password: str
+    *,
+    username: str,
+    password: str,
+    sms_handler: SmsHandler | None = None,
 ) -> tuple[str, str, str]:
-    """Validate credentials by logging in. Returns (encrypted_password, encrypted_session, label)."""
+    """Validate credentials by logging in. Returns (encrypted_password, encrypted_session, label).
+
+    If ``sms_handler`` is provided and BeatStars challenges us with 2FA, the
+    handler bridges the code between the API endpoint and this login thread.
+    """
     connector = BeatStarsConnector()
-    result = await connector.login_and_capture_session(username=username, password=password)
+    result = await connector.login_and_capture_session(
+        username=username, password=password, sms_handler=sms_handler
+    )
     return (
         encrypt_token(password),
         encrypt_token(serialize_storage_state(result.storage_state)),

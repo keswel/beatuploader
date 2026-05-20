@@ -31,8 +31,11 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(subject: str, extra: dict[str, Any] | None = None) -> str:
-    expire = datetime.now(UTC) + timedelta(minutes=settings.jwt_expire_minutes)
-    payload: dict[str, Any] = {"sub": subject, "exp": expire, "iat": datetime.now(UTC)}
+    now = datetime.now(UTC)
+    expire = now + timedelta(minutes=settings.jwt_expire_minutes)
+    # `iat` is load-bearing for the password-change revoke check in deps.py:
+    # tokens whose iat predates the user's password_changed_at are rejected.
+    payload: dict[str, Any] = {"sub": subject, "exp": expire, "iat": now}
     if extra:
         payload.update(extra)
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)

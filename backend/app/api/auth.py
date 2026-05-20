@@ -1,7 +1,8 @@
 import logging
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -29,11 +30,30 @@ from app.services.google_signin import (
     verify_id_token as google_verify_id_token,
     verify_signin_state,
 )
+from app.services.rate_limit import (
+    google_start_limiter,
+    limit_dependency,
+    login_limiter,
+    password_change_limiter,
+    register_limiter,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# A pre-computed bcrypt hash of a constant random password. Used in the login
+# branch where the user doesn't exist, so we still pay roughly the same bcrypt
+# cost we'd pay for a real user. Prevents timing-side-channel email enumeration.
+# (We don't care what value this hash is — its only job is to make verify_password
+# do real work in the no-user branch.)
+_DUMMY_PASSWORD_HASH = hash_password("dummy-password-for-constant-time-login")
 
-@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/register",
+    response_model=Token,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_dependency(register_limiter))],
+)
 async def register(payload: UserRegister, db: DbSession) -> Token:
     existing = await db.scalar(
         select(User).where((User.email == payload.email) | (User.handle == payload.handle))
@@ -44,10 +64,15 @@ async def register(payload: UserRegister, db: DbSession) -> Token:
             detail="Email or handle already in use",
         )
 
+    now = datetime.now(UTC)
     user = User(
         email=payload.email,
         handle=payload.handle,
         password_hash=hash_password(payload.password),
+        # Stamp from the start so password-change-revocation works for the
+        # freshly-issued token (iat == password_changed_at, allowed by the
+        # 1-second slack in get_current_user).
+        password_changed_at=now,
     )
     db.add(user)
     try:
@@ -66,14 +91,28 @@ async def register(payload: UserRegister, db: DbSession) -> Token:
     return Token(access_token=token, user=UserOut.model_validate(user))
 
 
-@router.post("/login", response_model=Token)
+@router.post(
+    "/login",
+    response_model=Token,
+    dependencies=[Depends(limit_dependency(login_limiter))],
+)
 async def login(payload: UserLogin, db: DbSession) -> Token:
     user = await db.scalar(select(User).where(User.email == payload.email))
-    if (
-        user is None
-        or user.password_hash is None
-        or not verify_password(payload.password, user.password_hash)
-    ):
+    # Constant-time-ish: always run bcrypt, even when the user is unknown or
+    # password-less (Google-only). Prevents timing-based email enumeration.
+    # The booleans below decide the outcome; verify_password runs either way.
+    target_hash = (
+        user.password_hash
+        if user is not None and user.password_hash is not None
+        else _DUMMY_PASSWORD_HASH
+    )
+    password_ok = verify_password(payload.password, target_hash)
+    valid = (
+        user is not None
+        and user.password_hash is not None
+        and password_ok
+    )
+    if not valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -106,7 +145,11 @@ async def update_me(
     return UserOut.model_validate(user)
 
 
-@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/change-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(limit_dependency(password_change_limiter))],
+)
 async def change_password(
     payload: PasswordChange, user: CurrentUser, db: DbSession
 ) -> None:
@@ -124,6 +167,9 @@ async def change_password(
                 detail="Current password is incorrect",
             )
     user.password_hash = hash_password(payload.new_password)
+    # Bump password_changed_at — invalidates every JWT previously issued for
+    # this user (including the one making this request).
+    user.password_changed_at = datetime.now(UTC)
     await db.commit()
 
 
@@ -141,7 +187,10 @@ async def delete_me(
     await db.commit()
 
 
-@router.post("/google/start")
+@router.post(
+    "/google/start",
+    dependencies=[Depends(limit_dependency(google_start_limiter))],
+)
 async def google_signin_start() -> dict:
     try:
         url, state = google_authorize_url()
@@ -156,9 +205,9 @@ async def google_signin_start() -> dict:
 @router.get("/google/callback")
 async def google_signin_callback(
     db: DbSession,
-    code: str | None = Query(default=None),
-    state: str | None = Query(default=None),
-    error: str | None = Query(default=None),
+    code: str | None = Query(default=None, max_length=2048),
+    state: str | None = Query(default=None, max_length=2048),
+    error: str | None = Query(default=None, max_length=256),
 ) -> RedirectResponse:
     settings = get_settings()
     frontend = settings.frontend_base_url.rstrip("/")

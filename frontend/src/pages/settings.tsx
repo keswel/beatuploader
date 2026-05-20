@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  CheckCircle2,
-  Lock,
-  Trash2,
-  Loader2,
   AlertTriangle,
+  Check,
+  CheckCircle2,
+  Loader2,
+  Lock,
   Plug,
+  Trash2,
+  X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,11 @@ import {
 } from "@/components/ui/dialog";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import {
+  PASSWORD_MIN_LENGTH,
+  checkPassword,
+  isPasswordValid,
+} from "@/lib/password";
 import { formatDate } from "@/lib/utils";
 
 export function SettingsPage() {
@@ -290,7 +297,9 @@ function SecuritySection() {
     },
   });
 
-  const valid = next.length >= 8 && next === confirm;
+  const checks = useMemo(() => checkPassword(next), [next]);
+  const strong = useMemo(() => isPasswordValid(next), [next]);
+  const valid = strong && next === confirm;
 
   return (
     <Section title="Security" description="Change your password.">
@@ -304,14 +313,21 @@ function SecuritySection() {
             placeholder="••••••••"
           />
         </Field>
-        <Field label="New password" hint="Min 8 characters.">
+        <Field
+          label="New password"
+          hint={`Min ${PASSWORD_MIN_LENGTH} chars, with uppercase, lowercase, number, and special character.`}
+        >
           <Input
             type="password"
             autoComplete="new-password"
             value={next}
-            onChange={(e) => setNext(e.target.value)}
+            onChange={(e) => {
+              setNext(e.target.value);
+              setSuccess(false);
+            }}
             placeholder="••••••••"
           />
+          {next.length > 0 && <PasswordChecklistInline checks={checks} />}
         </Field>
         <Field label="Confirm new password">
           <Input
@@ -494,6 +510,37 @@ function DangerZone({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PasswordChecklistInline({
+  checks,
+}: {
+  checks: ReturnType<typeof checkPassword>;
+}) {
+  const items: { ok: boolean; label: string }[] = [
+    { ok: checks.length, label: `${PASSWORD_MIN_LENGTH}+ characters` },
+    { ok: checks.upper, label: "Uppercase letter" },
+    { ok: checks.lower, label: "Lowercase letter" },
+    { ok: checks.digit, label: "Number" },
+    { ok: checks.special, label: "Special character" },
+  ];
+  return (
+    <ul className="grid grid-cols-2 gap-x-3 gap-y-1 pt-2 text-[10px]">
+      {items.map((it) => (
+        <li
+          key={it.label}
+          className={`flex items-center gap-1.5 ${
+            it.ok ? "text-emerald-400" : "text-zinc-500"
+          }`}
+        >
+          {it.ok ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+          {it.label}
+        </li>
+      ))}
+    </ul>
   );
 }
 
