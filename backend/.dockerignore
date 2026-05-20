@@ -1,0 +1,43 @@
+# Keep the build context small and avoid baking secrets / local state into the
+# image. The Dockerfile copies specific paths (app/, alembic/, alembic.ini,
+# pyproject.toml) so most of this is defense-in-depth — but .dockerignore is
+# also what `docker build .` uses to decide what to send to the daemon.
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Python / venv
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local SQLite databases and uploaded files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+storage/
+
+# OS / editor / VCS
+.git/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+*.stackdump
+
+# Logs and scratch
+*.log
+_smoke.py
+
+# Build artefacts that shouldn't be in a fresh image
+*.egg-info/
+dist/
+build/
