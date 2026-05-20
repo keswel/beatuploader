@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import sys
 from contextlib import asynccontextmanager
 
@@ -15,13 +16,60 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.api.router import api_router
 from app.config import get_settings
 from app.db import init_db
+from app.services.diagnostics_cleanup import prune_diagnostics
 
+log = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _init_sentry() -> None:
+    """Initialize Sentry if SENTRY_DSN is set. No-op otherwise.
+
+    Late-imported so the dependency stays optional — `pip install sentry-sdk`
+    isn't required to run the app, only to actually ship events upstream.
+    """
+    if not settings.sentry_dsn:
+        return
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+    except ImportError:
+        log.warning(
+            "SENTRY_DSN is set but sentry-sdk isn't installed. "
+            "Run: pip install 'sentry-sdk[fastapi]'"
+        )
+        return
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        # Don't sample traces unless explicitly asked — traces are noisy and
+        # expensive on the free tier. Errors are the main value.
+        traces_sample_rate=0.0,
+        # Send PII-stripped events. The FastAPI integration auto-attaches
+        # request URL/headers; turn off body capture in case any sensitive
+        # payloads slip in (login passwords etc.).
+        send_default_pii=False,
+        integrations=[
+            StarletteIntegration(transaction_style="endpoint"),
+            FastApiIntegration(transaction_style="endpoint"),
+        ],
+    )
+    log.info("Sentry initialized (environment=%s)", settings.sentry_environment)
+
+
+_init_sentry()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
+    # Best-effort: keep going if the prune fails.
+    try:
+        prune_diagnostics()
+    except Exception:
+        log.exception("diagnostics cleanup failed at startup")
     yield
 
 

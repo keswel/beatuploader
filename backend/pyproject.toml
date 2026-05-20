@@ -22,6 +22,9 @@ dependencies = [
     "google-api-python-client>=2.151.0",
     "aiofiles>=24.1.0",
     "playwright>=1.49.0",
+    # Sentry is optional at runtime — _init_sentry skips cleanly when DSN is
+    # unset — but bundling the SDK keeps prod images self-contained.
+    "sentry-sdk[fastapi]>=2.18.0",
 ]
 
 [project.optional-dependencies]

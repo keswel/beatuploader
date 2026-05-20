@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "Beatuploader <noreply@example.com>"
 
+    # Sentry error tracking. Empty DSN = disabled (no-op). Don't fail-soft on
+    # the DSN format — sentry-sdk raises a clean error on init if it's bad.
+    sentry_dsn: str = ""
+    sentry_environment: str = "development"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
