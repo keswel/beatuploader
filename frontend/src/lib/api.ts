@@ -9,7 +9,9 @@ import type {
   User,
 } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000/api";
+// Dev fallback matches start-backend.ps1 (port 8001). In prod, VITE_API_BASE
+// MUST be set at build time on Vercel — otherwise the bundle hits localhost.
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8001/api";
 const TOKEN_KEY = "beatuploader.token";
 
 export function getToken(): string | null {
