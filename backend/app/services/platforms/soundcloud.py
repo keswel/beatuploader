@@ -6,6 +6,7 @@ from app.services.platforms.base import (
     BeatMetadata,
     OAuthRedirect,
     PlatformConnector,
+    ProgressCallback,
     UploadHandle,
     UploadProgress,
 )
@@ -31,6 +32,7 @@ class SoundCloudConnector(PlatformConnector):
         *,
         file_path: Path,
         meta: BeatMetadata,
+        progress_cb: ProgressCallback | None = None,
     ) -> UploadHandle:
         raise NotImplementedError("SoundCloud upload")
 

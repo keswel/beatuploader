@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import enum
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.models.platform import PlatformConnection, PlatformProvider
+
+# Optional progress callback connectors can call during long uploads. Sync
+# signature on purpose — most platform SDKs are sync (google-api-python-client,
+# Playwright) and call this from a worker thread. Implementations of the
+# callback are responsible for any thread → asyncio hop.
+ProgressCallback = Callable[[int], None]
 
 
 class AuthMethod(str, enum.Enum):
@@ -97,8 +104,17 @@ class PlatformConnector(ABC):
         *,
         file_path: Path,
         meta: BeatMetadata,
+        progress_cb: ProgressCallback | None = None,
     ) -> UploadHandle:
-        """Kick off an upload. Should not block on completion — return a handle."""
+        """Kick off an upload. Should not block on completion — return a handle.
+
+        ``progress_cb`` is an optional integer-percentage callback (0–100) that
+        connectors may call as the upload makes forward progress. Safe to ignore
+        for connectors that can't surface progress (e.g. headless flows that
+        run inside Playwright). Always called from a worker thread for the sync
+        platform SDKs we use — the supplied callback handles the hop back to
+        the asyncio loop.
+        """
 
     @abstractmethod
     async def poll(self, connection: PlatformConnection, handle: UploadHandle) -> UploadProgress:

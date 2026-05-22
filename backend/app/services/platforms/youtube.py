@@ -20,6 +20,7 @@ from app.services.platforms.base import (
     BeatMetadata,
     OAuthRedirect,
     PlatformConnector,
+    ProgressCallback,
     UploadHandle,
     UploadProgress,
 )
@@ -177,6 +178,7 @@ class YouTubeConnector(PlatformConnector):
         *,
         file_path: Path,
         meta: BeatMetadata,
+        progress_cb: ProgressCallback | None = None,
     ) -> UploadHandle:
         creds = self._credentials(connection)
         original_access = creds.token
@@ -215,9 +217,21 @@ class YouTubeConnector(PlatformConnector):
                 media_body=media,
             )
             response = None
-            # next_chunk blocks; loop until done. We could surface progress but keep simple here.
+            # next_chunk returns (MediaUploadProgress, response). status is None
+            # until the upload finishes the chunk; we surface progress to the
+            # caller-supplied callback (clamped to 0–99 until YouTube returns
+            # the final response, then 100 from the outer flow).
             while response is None:
-                _, response = request.next_chunk()
+                status, response = request.next_chunk()
+                if progress_cb is not None and status is not None:
+                    try:
+                        pct = int(status.progress() * 100)
+                    except Exception:
+                        pct = 0
+                    # Save room for the post-publish step in the caller's view
+                    # of "done"; the outer job processor flips to 100 once the
+                    # whole connector returns.
+                    progress_cb(min(pct, 99))
             return response
 
         # google-api-python-client is sync, so offload to a thread

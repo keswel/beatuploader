@@ -42,6 +42,7 @@ from app.services.platforms.base import (
     BeatMetadata,
     OAuthRedirect,
     PlatformConnector,
+    ProgressCallback,
     UploadHandle,
     UploadProgress,
 )
@@ -1102,6 +1103,7 @@ class BeatStarsConnector(PlatformConnector):
         *,
         file_path: Path,
         meta: BeatMetadata,
+        progress_cb: ProgressCallback | None = None,  # noqa: ARG002 — Uppy progress not wired yet
     ) -> UploadHandle:
         storage: dict[str, Any] | None = None
         if connection.session_data_encrypted:
