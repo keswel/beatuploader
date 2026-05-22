@@ -38,7 +38,7 @@ npm run dev                                    # http://localhost:5173
 **First-time setup:**
 - Backend venv: `python -m venv .venv && .venv\Scripts\python.exe -m pip install -e .`
 - Playwright: `playwright install chromium` (~150MB)
-- DB: created/migrated automatically on first boot via `init_db()` (runs `alembic upgrade head`)
+- DB: created/migrated automatically on first boot via `init_db()` (runs `alembic upgrade head`). In prod we instead set `RUN_MIGRATIONS_ON_BOOT=false` and call `python -m app.migrate` as a Render pre-deploy step — see "Pitfalls / Multi-worker migration safety" and `render.yaml`.
 
 **Current dev setup runs on port 8001**, not 8000 — hardcoded in `start-backend.ps1`. There's no `backend/.env` — the user is running on **all dev defaults**. `BACKEND_BASE_URL=http://localhost:8001` is needed for OAuth redirect URIs to line up; `frontend/.env.local` has `VITE_API_BASE=http://127.0.0.1:8001/api`. Why 8001 in the first place: Windows leaves zombie LISTENING entries on 8000 for many minutes after a hard kill. If you change the port, update `start-backend.ps1`, the env override, `frontend/.env.local`, and the Google Console redirect URIs together.
 
@@ -101,6 +101,8 @@ MP3 is the required file (Basic license uses it; BeatStars can't publish without
 
 **Background processing is asyncio.create_task — NOT Celery/RQ.** Fine for MVP. Process crash = in-flight jobs lost. Revisit when multi-user or you need retries/scheduling.
 
+**Progress reporting:** `PlatformConnector.upload` takes an optional `progress_cb: Callable[[int], None]`. `jobs.py` supplies a thread-safe callback that uses `asyncio.run_coroutine_threadsafe` to hop from the connector's worker thread back to the loop, write `job.targets[provider].progress`, and commit. Throttled to >=5% deltas so a fast link doesn't spam the DB. **YouTube wired** (via `MediaUploadProgress.progress()` per chunk). BeatStars accepts the callback but doesn't use it yet — Uppy emits progress events; wiring them is a future cleanup.
+
 ### Auth (`backend/app/api/auth.py`, `frontend/src/lib/auth.tsx`)
 
 Three sign-in surfaces, all issue the same Beatuploader JWT:
@@ -112,6 +114,14 @@ Three sign-in surfaces, all issue the same Beatuploader JWT:
 **User model nuances:**
 - `password_hash` is nullable (Google-only users don't have one). Login rejects when `password_hash is None`.
 - `google_sub` is a nullable unique index.
+- `email_verified_at` is nullable. Set immediately on Google sign-in (Google has already verified the email). Set on email/password registrations by the verify-email flow.
+
+**Email verification flow:**
+- Register sends a 7-day JWT (`services/email_verification.py`, `purpose=email_verify`) over SMTP via the existing `send_email` service. SMTP failures don't fail registration — `send_email` swallows errors so a misconfigured SMTP doesn't block sign-up.
+- `POST /api/auth/verify-email {token}` (unauthenticated; the token is the credential) stamps `email_verified_at`. Re-verifying with the same token is a no-op success rather than an error.
+- `POST /api/auth/resend-verification` (authed, rate-limited 3/5min) re-sends or short-circuits if already verified.
+- Frontend renders a dismissible `<VerifyEmailBanner />` inside the dashboard layout. **Not blocking** — test users shouldn't be locked out by an SMTP misconfig. Re-enable gating later if/when needed.
+- `lib/auth.tsx` exposes `refresh()` so the verify-email page can clear the banner after success without a full page reload.
 
 **Settings:**
 - `PATCH /api/auth/me` — change handle (email change is intentionally not supported)
@@ -119,7 +129,7 @@ Three sign-in surfaces, all issue the same Beatuploader JWT:
 - `DELETE /api/auth/me` — delete account. Body `{confirm_handle}` must match. Cascades platforms/uploads/beats/files.
 
 **Common code:**
-- `deps.py::get_current_user` decodes JWT, catches `ValueError` (bad token) and `(TypeError, ValueError)` from `int(sub)` → 401
+- `deps.py::get_current_user` decodes JWT, catches `ValueError` (bad token) and `(TypeError, ValueError)` from `int(sub)` → 401. SQLite drops tzinfo when round-tripping `DateTime(timezone=True)`; we coerce naive `password_changed_at` values to UTC before comparing against the iat — without this, dev (SQLite) crashed on the comparison.
 - Frontend `lib/auth.tsx` hydrates user via `GET /api/auth/me` on mount; `setUnauthorizedHandler` clears token on any 401 → kicks to `/login`
 - Sign-in OAuth state JWT carries `purpose=signin` (no user_id); platform-connect state carries `uid`. Don't confuse them in callbacks.
 
@@ -175,7 +185,9 @@ The hardest integration and the product's differentiator. Lives in `services/pla
 
 ```
 User
-├── id, email, handle, password_hash (nullable), google_sub (nullable, unique), plan, created_at
+├── id, email, handle, password_hash (nullable), google_sub (nullable, unique),
+│   email_verified_at (nullable), password_changed_at (nullable),
+│   youtube_description_template (nullable), plan, created_at
 ├── platforms ←→ PlatformConnection (cascade delete)
 ├── uploads ←→ UploadJob (cascade delete)
 └── beats ←→ Beat (cascade delete)
@@ -236,6 +248,10 @@ Beat
 - `<AuthedImage>` (`components/authed-image.tsx`) for any endpoint that requires auth — fetches with Bearer header, returns blob URL. Used for `/api/uploads/{id}/artwork` thumbnails.
 - The upload page auto-categorizes dropped files by extension (`classify()` in `pages/upload.tsx`).
 
+**Routes:** `/` is the public landing page. The dashboard root is `/dashboard` (NOT `/`). Authed visitors who hit `/` get bounced to `/dashboard`. Public routes: `/login`, `/forgot-password`, `/reset-password`, `/verify-email`, `/auth/google`, `/privacy`, `/terms`. Authed-only routes (wrapped by `AuthGate` + `Layout`): `/dashboard`, `/upload`, `/platforms`, `/library`, `/settings`. Don't link to `/` from authed pages — link to `/dashboard`.
+
+**Mobile nav:** sidebar is `hidden md:flex`. On phones, `components/mobile-nav.tsx` renders a hamburger in the Topbar that opens a Radix Dialog sheet with the same nav items. Don't duplicate nav items — `navItems` is defined in both `sidebar.tsx` and `mobile-nav.tsx`; keep them in sync by hand if you add a new top-level page.
+
 ## Backend conventions
 
 - Async everywhere (SQLAlchemy 2.0 async). Don't introduce sync sessions.
@@ -254,8 +270,9 @@ Beat
 
 ## Pitfalls
 
-- **Alembic single-writer assumption** — `init_db()` runs `alembic upgrade head` on every app boot. The Dockerfile uses one uvicorn worker, so that's safe. If you scale to multiple workers/instances, move migrations into a one-shot pre-deploy job — otherwise N workers race for the same advisory lock on startup.
+- **Alembic single-writer / multi-worker safety** — `init_db()` runs `alembic upgrade head` on every app boot, gated by the `RUN_MIGRATIONS_ON_BOOT` flag (default true for dev). The Dockerfile uses one uvicorn worker so that's safe. For Render and any other multi-worker / multi-instance deploy: set `RUN_MIGRATIONS_ON_BOOT=false` and run `python -m app.migrate` as a pre-deploy step (already wired in `render.yaml` as `preDeployCommand`). Otherwise N workers race the alembic version lock on startup.
 - **No real worker queue** — `asyncio.create_task` lives in the process. Process crash = in-flight uploads lost. The `_in_flight` set holds references but only prevents GC; doesn't survive a restart.
+- **DATABASE_URL normalization** — `app/db._async_database_url` rewrites `postgres://` and `postgresql://` to `postgresql+asyncpg://`, and strips libpq-only query params (`sslmode`, `channel_binding`, `target_session_attrs`, `gssencmode`). asyncpg silently ignores those, which would mean falling back to plaintext on a TLS-only server. For any non-localhost Postgres URL we also pass `connect_args={"ssl": True}` to actually negotiate TLS. Keep this in mind if you touch `db.py`.
 - **BeatStars selectors can break anytime** — Angular CSS classes (`_ngcontent-ng-c*`) change every BeatStars deploy. We pin to `data-qa`, `data-cy`, IDs, and visible text. If something stops working, capture a diagnostic and check the selectors.
 - **Cropper / Uppy editor blocking** — both Uppy's built-in editor (`.uppy-DashboardContent-panel--editor`) and BeatStars's post-upload Cropper.js (`.cropper-modal`) intercept clicks. Always dismiss them before trying to click anything else. The artwork upload + license toggle paths both run `_close_cropper_if_open` defensively.
 - **Material slide-toggle clicks** — `mat-slide-toggle` wraps a hidden `<input role="switch">`. Clicking the wrapper through Playwright's `.click()` doesn't reliably register with Angular's change detection. Use `page.evaluate` to call `.click()` on the input directly. See `_enable_license`.
@@ -265,22 +282,30 @@ Beat
 
 ## Known gaps / TODO
 
-Ranked roughly by impact:
+Ranked roughly by impact. Items struck from the previous version of this list have moved to "Done since last revision" below.
 
 - **BeatStars SMS 2FA selector verification** — the interactive flow is built end-to-end (challenge store + `SmsHandler` callbacks into `_do_login` + two-stage frontend dialog). Selectors for the SMS code input (`input[autocomplete="one-time-code"]`, `input[name="code"]`, etc.) and submit button are best-guesses since the 2FA page only renders when BeatStars actually challenges us. On the first real challenge, the worker writes a `sms-*.html` diagnostic — use it to tighten `SMS_CODE_INPUT_SELECTORS` / `SMS_SUBMIT_SELECTORS` in `services/platforms/beatstars.py`.
 - **Redis-backed rate limiter** — current limiter is in-memory and per-process. Fine for the single-uvicorn-worker MVP; not safe for multi-worker or multi-instance prod. Swap for `slowapi + limits` with a Redis storage backend before scaling out.
-- **Reverse-proxy IP handling** — rate limiter keys off `request.client.host`. Behind a proxy (Nginx, Cloudflare, etc.) you must run uvicorn with `--proxy-headers` (or `--forwarded-allow-ips`) so that's the real client and not the proxy. Otherwise every request looks like one IP and the limits become global.
-- **More platforms** — SoundCloud (OAuth, easy), Spotify (via DistroKid), Audiomack (OAuth), Bandcamp (headless). All zero progress.
-- **Production deployment** — Dockerfile, hosted Postgres, R2/S3 for file storage, Vercel for frontend, OAuth redirect URI updates in Google Console. Required for Google verification.
-- **Real worker queue** — arq, RQ, or Celery
-- **Real progress reporting** — YouTube resumable upload has per-chunk callbacks. Wire them through to `job.targets[provider].progress`. BeatStars's Uppy emits progress events too — could capture via page eval.
-- **Multi-worker migration safety** — once we move past single-worker uvicorn, the `init_db() → alembic upgrade head` on every boot becomes a stampede. Move migrations into a pre-deploy job at that point.
+- **More platforms** — SoundCloud (OAuth — SoundCloud API registrations are gated and may need outreach), Spotify (via DistroKid), Audiomack (OAuth), Bandcamp (headless). All zero progress beyond the SoundCloud `NotImplementedError` stub.
+- **Real worker queue** — arq, RQ, or Celery. Today's `asyncio.create_task` loses in-flight uploads on every container restart (Render redeploys, scale events).
+- **BeatStars progress reporting** — connector accepts a `progress_cb` per the new base.py signature but doesn't call it yet. Uppy emits progress events on `.uppy-StatusBar`; capture via `page.evaluate` and feed the callback (YouTube already does this, see `youtube.py::_do_upload`).
+- **File storage on object store** — `services/storage.py` writes to disk under `STORAGE_DIR`. Fine on Render's persistent disk for MVP; doesn't scale across instances. Swap for R2/S3 via boto3 / aioboto3 when needed.
 - **HttpOnly cookie sessions** — token is in `localStorage`, vulnerable to XSS exfiltration. Move to HttpOnly+Secure+SameSite cookies if/when we accept user-rendered HTML or third-party scripts.
-- **Email** (transactional) — verification, password reset, "your upload is live"
-- **Stripe / billing** — `User.plan` exists but is just a string
-- **Tests** — pytest+pytest-asyncio installed; zero tests written. Start with auth happy path + upload pipeline + password validator.
-- **OAuth provider verification (Google)** — required before non-test-users can use YouTube. 4–6 week process.
-- **Mobile UX pass** — desktop-first; sidebar hides at `md:` but upload page is cramped on phones
+- **Transactional email beyond verification/reset** — "your upload is live", weekly digest. Wired SMTP service is generic enough that it's just templating + the right trigger points.
+- **Stripe / billing** — `User.plan` exists but is just a string with no enforcement.
+- **OAuth provider verification (Google)** — required before non-test-users can use YouTube. 4–6 week process; the app is technically ready, just blocked on Google review.
+
+### Done since the previous revision
+
+These were on the list and are now resolved — keep an eye out so you don't re-add them.
+
+- ~~**Multi-worker migration safety**~~ — `RUN_MIGRATIONS_ON_BOOT=false` + `python -m app.migrate` as a Render `preDeployCommand`. See Pitfalls.
+- ~~**Real progress reporting (YouTube)**~~ — `MediaUploadProgress.progress()` per chunk → `progress_cb` → `job.targets[provider].progress`, throttled to ≥5% deltas. BeatStars still pending (see Known gaps above).
+- ~~**Email verification**~~ — full register → email → /verify-email → stamp `email_verified_at` flow, resend endpoint, dismissible dashboard banner. See "Auth / Email verification flow".
+- ~~**Tests**~~ — 42 tests covering auth, password policy, security primitives, DB URL normalization, rate limiter behind a proxy, email verification. Run from `backend/`: `python -m pytest tests/`.
+- ~~**Mobile UX pass**~~ — hamburger drawer (`components/mobile-nav.tsx`) with the same workspace nav, upload page tightening, PageHeader stacks on mobile.
+- ~~**Reverse-proxy IP handling**~~ — Dockerfile runs uvicorn with `--proxy-headers --forwarded-allow-ips '*'`; rate limiter behavior covered by tests in `tests/test_rate_limit.py`. Note: this still requires the upstream proxy (Render/Cloudflare/etc.) to be in front; the test verifies the *limiter side* of the contract.
+- ~~**Production deployment**~~ — `render.yaml`, `vercel.json`, `DEPLOY.md` runbook all in place.
 
 ## Reference: Google Cloud OAuth setup
 
