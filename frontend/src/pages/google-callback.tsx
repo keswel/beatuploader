@@ -25,7 +25,7 @@ export function GoogleCallbackPage() {
       loginWithToken(token)
         .then(() => {
           // Wipe the fragment from history so the token can't be re-used by going back
-          navigate("/", { replace: true });
+          navigate("/dashboard", { replace: true });
         })
         .catch(() => setError("Couldn't verify sign-in"));
       return;

@@ -39,7 +39,7 @@ export function LoginPage() {
   };
 
   if (!authLoading && isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   const passwordChecks = useMemo(() => checkPassword(password), [password]);
@@ -59,7 +59,7 @@ export function LoginPage() {
       } else {
         await register(email, handle, password);
       }
-      navigate("/", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Something went wrong");
     } finally {

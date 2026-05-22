@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 
 const navItems = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
+  { to: "/dashboard", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/upload", label: "Upload", icon: UploadCloud },
   { to: "/platforms", label: "Platforms", icon: Plug },
   { to: "/library", label: "Library", icon: Library },
