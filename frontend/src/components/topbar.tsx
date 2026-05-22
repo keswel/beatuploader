@@ -1,5 +1,7 @@
-import { Bell, Search, Command } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Bell, Command, Disc3, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MobileNav } from "./mobile-nav";
 import { useAuth } from "@/lib/auth";
 
 export function Topbar() {
@@ -8,8 +10,26 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-20 h-14 border-b border-zinc-800/60 glass">
-      <div className="flex h-full items-center gap-3 px-6">
-        <div className="relative flex-1 max-w-md">
+      <div className="flex h-full items-center gap-2 sm:gap-3 px-4 sm:px-6">
+        {/* Mobile-only: hamburger + wordmark. The desktop sidebar carries the
+            brand on >= md, so we render the wordmark only here on small. */}
+        <MobileNav />
+        <Link
+          to="/dashboard"
+          className="md:hidden flex items-center gap-2"
+          aria-label="Beatuploader"
+        >
+          <div className="flex h-6 w-6 items-center justify-center rounded bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-950">
+            <Disc3 className="h-3 w-3" />
+          </div>
+          <span className="text-sm font-semibold tracking-tight">
+            Beatuploader
+          </span>
+        </Link>
+
+        {/* Search is desktop-only — it's mostly aspirational right now and just
+            crowds the mobile header. */}
+        <div className="relative flex-1 max-w-md hidden md:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500 pointer-events-none" />
           <input
             type="text"

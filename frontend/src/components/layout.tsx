@@ -13,7 +13,7 @@ export function Layout() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar />
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-7xl px-6 py-8">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8">
             <VerifyEmailBanner />
             <AnimatePresence mode="wait">
               <motion.div

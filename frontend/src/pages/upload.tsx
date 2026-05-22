@@ -339,14 +339,19 @@ export function UploadPage() {
             {dragOver && (
               <div className="absolute inset-0 shimmer pointer-events-none" />
             )}
-            <div className="relative flex flex-col items-center justify-center px-6 py-12 text-center">
-              <div className="h-12 w-12 rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 ring-1 ring-zinc-700/50 flex items-center justify-center mb-4 shadow-[0_0_30px_-6px_rgba(255,255,255,0.1)]">
+            <div className="relative flex flex-col items-center justify-center px-4 sm:px-6 py-8 sm:py-12 text-center">
+              <div className="h-11 w-11 sm:h-12 sm:w-12 rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 ring-1 ring-zinc-700/50 flex items-center justify-center mb-3 sm:mb-4 shadow-[0_0_30px_-6px_rgba(255,255,255,0.1)]">
                 <UploadCloud className="h-5 w-5 text-zinc-300" />
               </div>
               <div className="text-sm font-medium text-zinc-100">
-                Drop your files here
+                <span className="md:hidden">Tap to choose files</span>
+                <span className="hidden md:inline">Drop your files here</span>
               </div>
-              <div className="mt-1 text-xs text-zinc-500">
+              {/* Short hint on small screens, full extension list on desktop. */}
+              <div className="mt-1 text-xs text-zinc-500 md:hidden">
+                Audio, stems, artwork, or video — we sort them.
+              </div>
+              <div className="mt-1 text-xs text-zinc-500 hidden md:block">
                 We'll sort them: <span className="font-mono">.wav</span> → master,{" "}
                 <span className="font-mono">.mp3</span> → tagged,{" "}
                 <span className="font-mono">.zip/.rar</span> → stems,{" "}
@@ -669,7 +674,7 @@ function FileSlot({ role, label, hint, required, file, onClear }: FileSlotProps)
           ? FileVideo
           : FileAudio;
   return (
-    <div className="flex items-center gap-4 px-5 py-3.5">
+    <div className="flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 sm:py-3.5">
       <div
         className={cn(
           "h-9 w-9 rounded-md ring-1 flex items-center justify-center shrink-0 transition-colors",
@@ -749,7 +754,7 @@ function ServerJobRow({
       animate={{ opacity: 1, height: "auto" }}
       exit={{ opacity: 0, height: 0 }}
       transition={{ duration: 0.3, ease: [0.32, 0.72, 0, 1] }}
-      className="flex items-center gap-4 px-5 py-3.5 overflow-hidden"
+      className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 sm:py-3.5 overflow-hidden"
     >
       <div className="h-9 w-9 rounded-md bg-gradient-to-br from-zinc-800 to-zinc-900 ring-1 ring-zinc-800 flex items-center justify-center shrink-0 overflow-hidden">
         <AuthedImage
@@ -778,7 +783,9 @@ function ServerJobRow({
           <div className="mt-1 text-xs text-red-400 truncate">{job.error}</div>
         )}
       </div>
-      <div className="flex items-center gap-2 shrink-0">
+      {/* On narrow screens the action cluster wraps to a new row under the filename
+          instead of crushing against it. ml-auto pushes it right when wrapped. */}
+      <div className="flex items-center gap-2 shrink-0 ml-auto sm:ml-0">
         {statusBadge}
         {(job.status === "failed" || job.status === "done") && (
           <Button
