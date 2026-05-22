@@ -129,20 +129,33 @@ async def _unique_handle(db: AsyncSession, base: str) -> str:
 async def signin_or_create_user(
     db: AsyncSession, *, claims: dict[str, Any]
 ) -> User:
-    """Auto-link by email per user's product decision."""
+    """Auto-link by email per user's product decision.
+
+    Google already verified the email (we check email_verified upstream of this
+    function), so any user we touch here gets email_verified_at stamped. Either
+    sets it on a freshly-created user or back-fills it on an existing one that
+    happened to register via email/password first.
+    """
     email: str = claims["email"]
     sub: str = claims["sub"]
     name: str | None = claims.get("name")
+    now = datetime.now(UTC)
 
     # Match by google_sub first (fast path for returning users)
     user = await db.scalar(select(User).where(User.google_sub == sub))
     if user is not None:
+        if user.email_verified_at is None:
+            user.email_verified_at = now
+            await db.commit()
+            await db.refresh(user)
         return user
 
     # Auto-link by email
     user = await db.scalar(select(User).where(User.email == email))
     if user is not None:
         user.google_sub = sub
+        if user.email_verified_at is None:
+            user.email_verified_at = now
         await db.commit()
         await db.refresh(user)
         return user
@@ -154,6 +167,7 @@ async def signin_or_create_user(
         handle=handle,
         password_hash=None,
         google_sub=sub,
+        email_verified_at=now,
     )
     db.add(user)
     await db.commit()

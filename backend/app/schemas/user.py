@@ -57,6 +57,7 @@ class UserOut(BaseModel):
     email: EmailStr
     handle: str
     plan: str
+    email_verified_at: datetime | None = None
     youtube_description_template: str | None = None
     created_at: datetime
 
@@ -100,3 +101,7 @@ class PasswordResetConfirm(BaseModel):
     @classmethod
     def _password_strength(cls, v: str) -> str:
         return _validate_password(v)
+
+
+class EmailVerifyConfirm(BaseModel):
+    token: str = Field(min_length=1, max_length=2048)

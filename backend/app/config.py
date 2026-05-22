@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # claimed quickly, not weeks later.
     password_reset_expire_seconds: int = 1800  # 30 min
 
+    # Email-verification link lifetime. Longer than reset: users sometimes click
+    # verify days later, and an expired verify link is just an annoying re-send,
+    # not a security problem.
+    email_verify_expire_seconds: int = 60 * 60 * 24 * 7  # 7 days
+
     # Outbound email (used by password reset, future verification). If
     # `smtp_host` is empty, EmailService logs the email to stdout instead of
     # sending — fine for dev. Set all four in prod.

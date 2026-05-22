@@ -2,6 +2,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
+import { VerifyEmailBanner } from "./verify-email-banner";
 
 export function Layout() {
   const location = useLocation();
@@ -13,6 +14,7 @@ export function Layout() {
         <Topbar />
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-7xl px-6 py-8">
+            <VerifyEmailBanner />
             <AnimatePresence mode="wait">
               <motion.div
                 key={location.pathname}

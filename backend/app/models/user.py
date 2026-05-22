@@ -22,6 +22,12 @@ class User(Base):
     google_sub: Mapped[str | None] = mapped_column(
         String(64), unique=True, nullable=True, index=True
     )
+    # Timestamp of email verification. Null = unverified. Google sign-in stamps
+    # this immediately (Google's email_verified claim has already done the work);
+    # email/password registrations set it via the verify-email flow.
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     plan: Mapped[str] = mapped_column(String(32), default="free")
     # Optional YouTube description template. Supports placeholders:
     # {title} {bpm} {key} {tags} {beatstars_link}

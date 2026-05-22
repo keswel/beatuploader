@@ -20,6 +20,8 @@ interface AuthContextValue {
   register: (email: string, handle: string, password: string) => Promise<void>;
   loginWithToken: (token: string) => Promise<void>;
   logout: () => void;
+  /** Re-fetch /me — e.g. after verifying email so the banner clears. */
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -77,6 +79,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u);
   }, []);
 
+  const refresh = useCallback(async () => {
+    if (!getToken()) return;
+    const u = await api.auth.me();
+    setUser(u);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -86,8 +94,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       register,
       loginWithToken,
       logout,
+      refresh,
     }),
-    [user, isLoading, login, register, loginWithToken, logout],
+    [user, isLoading, login, register, loginWithToken, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

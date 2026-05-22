@@ -19,6 +19,7 @@ export interface User {
   email: string;
   handle: string;
   plan: string;
+  email_verified_at: string | null;
   youtube_description_template: string | null;
   created_at: string;
 }

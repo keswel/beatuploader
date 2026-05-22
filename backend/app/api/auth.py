@@ -14,6 +14,7 @@ from app.deps import CurrentUser, DbSession
 from app.models.user import User
 from app.schemas.user import (
     AccountDelete,
+    EmailVerifyConfirm,
     PasswordChange,
     PasswordResetConfirm,
     PasswordResetRequest,
@@ -25,6 +26,11 @@ from app.schemas.user import (
 )
 from app.security import create_access_token, hash_password, verify_password
 from app.services.email import send_email
+from app.services.email_verification import (
+    issue_verify_token,
+    verify_link,
+    verify_verify_token,
+)
 from app.services.google_signin import (
     authorize_url as google_authorize_url,
     exchange_code as google_exchange_code,
@@ -39,6 +45,7 @@ from app.services.password_reset import (
     verify_reset_token,
 )
 from app.services.rate_limit import (
+    email_verify_resend_limiter,
     google_start_limiter,
     limit_dependency,
     login_limiter,
@@ -56,6 +63,26 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # (We don't care what value this hash is — its only job is to make verify_password
 # do real work in the no-user branch.)
 _DUMMY_PASSWORD_HASH = hash_password("dummy-password-for-constant-time-login")
+
+
+async def _send_verification_email(user: User) -> None:
+    """Fire-and-forget verification email. Never raises — email is a side
+    effect of registration; an SMTP outage shouldn't break sign-up."""
+    settings = get_settings()
+    token = issue_verify_token(user.id)
+    link = verify_link(settings.frontend_base_url, token)
+    body = (
+        f"Hi {user.handle},\n\n"
+        f"Welcome to Beatuploader. Confirm your email so we can keep your "
+        f"account secure and send you upload notifications.\n\n"
+        f"{link}\n\n"
+        f"If you didn't sign up for Beatuploader, you can ignore this email.\n"
+    )
+    await send_email(
+        to=user.email,
+        subject="Verify your Beatuploader email",
+        body=body,
+    )
 
 
 @router.post(
@@ -96,6 +123,11 @@ async def register(payload: UserRegister, db: DbSession) -> Token:
             detail="Email or handle already in use",
         ) from exc
     await db.refresh(user)
+
+    # Send verification email — fire-and-forget (errors swallowed by send_email
+    # so SMTP outages don't fail registration). The user can ask for a resend
+    # later via /api/auth/resend-verification.
+    await _send_verification_email(user)
 
     token = create_access_token(subject=str(user.id))
     return Token(access_token=token, user=UserOut.model_validate(user))
@@ -340,3 +372,52 @@ async def google_signin_callback(
 
     jwt_token = create_access_token(subject=str(user.id))
     return _fragment_redirect({"status": "ok", "token": jwt_token})
+
+
+@router.post(
+    "/verify-email",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def verify_email(payload: EmailVerifyConfirm, db: DbSession) -> None:
+    """Stamp email_verified_at on a user when they click the link in their email.
+
+    Re-verifying with an already-claimed token is a no-op (200 success) rather
+    than an error — that's a better UX for users who click an older link.
+    Unauthenticated on purpose: the token is the credential.
+    """
+    try:
+        user_id = verify_verify_token(payload.token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification link is invalid or has expired. Request a new one.",
+        ) from exc
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification link is invalid or has expired. Request a new one.",
+        )
+    if user.email_verified_at is None:
+        user.email_verified_at = datetime.now(UTC)
+        await db.commit()
+
+
+@router.post(
+    "/resend-verification",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(limit_dependency(email_verify_resend_limiter))],
+)
+async def resend_verification(user: CurrentUser) -> dict:
+    """Re-send the verification email to the authed user.
+
+    Authed (not anonymous-with-email like /forgot-password) because:
+      - The recipient is the user logged in via JWT; harder to abuse as a
+        mail relay against arbitrary addresses.
+      - Lets us short-circuit when the user is already verified.
+    """
+    if user.email_verified_at is not None:
+        # Already verified — no-op success rather than an error.
+        return {"status": "already_verified"}
+    await _send_verification_email(user)
+    return {"status": "sent"}

@@ -5,6 +5,7 @@ import { LandingPage } from "@/pages/landing";
 import { LoginPage } from "@/pages/login";
 import { ForgotPasswordPage } from "@/pages/forgot-password";
 import { ResetPasswordPage } from "@/pages/reset-password";
+import { VerifyEmailPage } from "@/pages/verify-email";
 import { GoogleCallbackPage } from "@/pages/google-callback";
 import { OverviewPage } from "@/pages/overview";
 import { UploadPage } from "@/pages/upload";
@@ -21,6 +22,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/auth/google" element={<GoogleCallbackPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/terms" element={<TermsPage />} />

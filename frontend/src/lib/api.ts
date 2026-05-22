@@ -129,6 +129,17 @@ export const api = {
         body: JSON.stringify(payload),
         auth: false,
       }),
+    verifyEmail: (token: string) =>
+      request<void>("/auth/verify-email", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+        auth: false,
+      }),
+    resendVerification: () =>
+      request<{ status: "sent" | "already_verified" }>(
+        "/auth/resend-verification",
+        { method: "POST" },
+      ),
   },
   platforms: {
     list: () => request<PlatformOut[]>("/platforms"),

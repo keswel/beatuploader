@@ -99,6 +99,11 @@ password_reset_confirm_limiter = RateLimiter(
 google_start_limiter = RateLimiter(
     max_requests=20, window_seconds=60, name="google_start"
 )
+# Email-verification resends: a determined attacker hitting /resend-verification
+# is trying to use us as a mail relay against a single recipient. Tight cap.
+email_verify_resend_limiter = RateLimiter(
+    max_requests=3, window_seconds=300, name="email_verify_resend"
+)
 
 # BeatStars: each call spins up a real Playwright browser — much tighter cap
 # both to prevent abuse and to keep the box from OOMing.
