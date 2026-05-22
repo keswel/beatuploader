@@ -1,0 +1,16 @@
+# Allow indexing of the public landing + legal pages, block authed routes.
+# Authed routes don't render anything useful when crawled (they redirect to
+# /login) but adding them here also keeps them out of search results in case
+# we later add a public profile page.
+
+User-agent: *
+Disallow: /dashboard
+Disallow: /upload
+Disallow: /platforms
+Disallow: /library
+Disallow: /settings
+Disallow: /auth/
+Allow: /
+
+# Update this once the domain is live.
+# Sitemap: https://beatuploader.com/sitemap.xml
