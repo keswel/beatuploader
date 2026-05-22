@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -7,12 +8,51 @@ from app.config import get_settings
 
 settings = get_settings()
 
-engine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    future=True,
-    pool_pre_ping=True,
-)
+
+def _async_database_url(url: str) -> str:
+    """Normalize an arbitrary Postgres/SQLite URL into one async SQLAlchemy accepts.
+
+    Two things to fix:
+
+    1. Driver. Render (and most managed Postgres providers) hand out
+       `postgres://` or `postgresql://` URLs. The async engine needs an explicit
+       `+asyncpg`; SQLite likewise needs `+aiosqlite`.
+
+    2. SSL params. Render/Heroku/etc. append `?sslmode=require`. That's a libpq
+       (sync psycopg2) keyword and asyncpg silently ignores it — meaning the
+       connection succeeds without TLS, breaking your encrypted-in-transit
+       expectation. Strip it from the URL and we let asyncpg's default SSL
+       handling kick in (TLS for any non-localhost target).
+    """
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+        # Drop sslmode / channel_binding / target_session_attrs etc. — these
+        # are libpq parameters asyncpg doesn't understand.
+        parts = urlsplit(url)
+        q = parse_qs(parts.query, keep_blank_values=True)
+        for k in ("sslmode", "channel_binding", "target_session_attrs", "gssencmode"):
+            q.pop(k, None)
+        url = urlunsplit(
+            parts._replace(query=urlencode(q, doseq=True))
+        )
+        return url
+    if url.startswith("sqlite://"):
+        return "sqlite+aiosqlite://" + url[len("sqlite://"):]
+    return url
+
+
+_engine_kwargs: dict = {"echo": False, "future": True, "pool_pre_ping": True}
+
+# asyncpg wants SSL configured via connect_args when talking to a remote DB.
+# Render Postgres requires TLS; the public hostname won't accept plaintext.
+# Skip for localhost so dev keeps working without certs.
+_db_url = _async_database_url(settings.database_url)
+if _db_url.startswith("postgresql+asyncpg://") and "localhost" not in _db_url and "127.0.0.1" not in _db_url:
+    _engine_kwargs["connect_args"] = {"ssl": True}
+
+engine = create_async_engine(_db_url, **_engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     engine,

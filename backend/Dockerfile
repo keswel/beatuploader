@@ -42,9 +42,13 @@ EXPOSE 8000
 #   fine inside a managed PaaS where the only inbound is the platform's proxy;
 #   tighten if you run on bare metal.
 # Single worker — see header comment.
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "1", \
-     "--proxy-headers", \
-     "--forwarded-allow-ips", "*"]
+#
+# PORT env var: Render/Fly/Railway inject a port. Default to 8000 for local
+# `docker run` without -e PORT. Shell form so $PORT expands at container start.
+ENV PORT=8000
+CMD uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port $PORT \
+    --workers 1 \
+    --proxy-headers \
+    --forwarded-allow-ips '*'

@@ -23,7 +23,7 @@ from alembic import context
 # Import the app's Base + every model. The unused-import noqa is load-bearing —
 # importing the package registers all tables on Base.metadata.
 from app.config import get_settings
-from app.db import Base
+from app.db import Base, _async_database_url
 from app import models  # noqa: F401
 
 config = context.config
@@ -32,8 +32,12 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Resolve the DB URL from app settings at runtime, overriding whatever (empty)
-# value is in alembic.ini. Keeps secrets out of alembic.ini.
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# value is in alembic.ini. Keeps secrets out of alembic.ini. The CLI path
+# (`alembic upgrade head` from a shell) opens its own engine and needs an
+# explicit async driver — normalize the URL the same way db.py does.
+config.set_main_option(
+    "sqlalchemy.url", _async_database_url(get_settings().database_url)
+)
 
 target_metadata = Base.metadata
 
