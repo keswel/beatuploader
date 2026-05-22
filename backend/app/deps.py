@@ -53,9 +53,16 @@ async def get_current_user(
             iat_dt = datetime.fromtimestamp(int(iat), tz=UTC)
         except (TypeError, ValueError, OSError) as exc:
             raise credentials_exc from exc
+        # SQLite (dev) loses tzinfo on round-trip for DateTime(timezone=True).
+        # Postgres preserves it. We always *write* UTC-aware values via
+        # datetime.now(UTC), so a naive value coming back is safe to treat
+        # as UTC. Coerce so the comparison below works in both backends.
+        changed_at = user.password_changed_at
+        if changed_at.tzinfo is None:
+            changed_at = changed_at.replace(tzinfo=UTC)
         # Allow 1s slack to absorb sub-second clock differences when a token
         # is issued in the same request that sets password_changed_at.
-        if iat_dt < user.password_changed_at.replace(microsecond=0):
+        if iat_dt < changed_at.replace(microsecond=0):
             raise credentials_exc
 
     return user

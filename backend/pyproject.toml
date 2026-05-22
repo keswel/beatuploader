@@ -34,6 +34,11 @@ dev = [
     "pytest-asyncio>=0.24.0",
 ]
 
+[tool.setuptools]
+# Without this, the new `tests/` directory makes setuptools auto-discovery
+# bail with "Multiple top-level packages discovered". Be explicit.
+packages = ["app"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
