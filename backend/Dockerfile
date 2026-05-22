@@ -43,10 +43,12 @@ EXPOSE 8000
 #   tighten if you run on bare metal.
 # Single worker — see header comment.
 #
-# PORT env var: Render/Fly/Railway inject a port. Default to 8000 for local
-# `docker run` without -e PORT. Shell form so $PORT expands at container start.
+# PORT env var: Render/Fly/Railway inject a port at container start. Default
+# to 8000 for `docker run` without -e PORT. `exec` form replaces the shell so
+# uvicorn becomes PID 1 and receives SIGTERM directly — without `exec`, /bin/sh
+# would intercept the signal and uvicorn never gets a clean shutdown.
 ENV PORT=8000
-CMD uvicorn app.main:app \
+CMD exec uvicorn app.main:app \
     --host 0.0.0.0 \
     --port $PORT \
     --workers 1 \
