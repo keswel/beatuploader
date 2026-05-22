@@ -169,9 +169,10 @@ If any step fails:
 Most config changes can stay in `render.yaml` for blueprint-tracked values + the Render dashboard for `sync: false` secrets. Pushing to `main` triggers an auto-deploy of both services.
 
 When you outgrow the current setup (probably in this order):
-1. **Move migrations into a pre-deploy job** before scaling past 1 backend worker. Right now `init_db()` runs on every boot — multiple workers will race the Alembic version lock.
-2. **Add a Redis-backed rate limiter.** In-memory limiter only works for one process.
-3. **Move file storage from disk to R2/S3.** Persistent disks don't scale across instances.
-4. **Replace asyncio.create_task with arq + Redis.** In-flight uploads die with the container on every redeploy.
+1. **Add a Redis-backed rate limiter.** In-memory limiter only works for one process.
+2. **Move file storage from disk to R2/S3.** Persistent disks don't scale across instances.
+3. **Replace asyncio.create_task with arq + Redis.** In-flight uploads die with the container on every redeploy.
+
+Migrations already run as a Render `preDeployCommand` against the new image before traffic shifts — see `render.yaml`. Multi-worker scaling won't race the alembic lock.
 
 See [CLAUDE.md → Known gaps](./CLAUDE.md#known-gaps--todo) for the full list.

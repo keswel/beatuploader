@@ -64,7 +64,17 @@ _init_sentry()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    await init_db()
+    # Migrations on boot are safe in single-worker mode (Dockerfile default) but
+    # would race the alembic version lock when scaled to multiple workers /
+    # instances. Operators flip RUN_MIGRATIONS_ON_BOOT=false and run
+    # `python -m app.migrate` as a pre-deploy job instead.
+    if settings.run_migrations_on_boot:
+        await init_db()
+    else:
+        log.info(
+            "RUN_MIGRATIONS_ON_BOOT=false — skipping migrations. "
+            "Ensure they were applied by a pre-deploy job."
+        )
     # Best-effort: keep going if the prune fails.
     try:
         prune_diagnostics()

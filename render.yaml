@@ -43,6 +43,11 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: true
+    # Render runs preDeployCommand against the new image BEFORE traffic shifts
+    # to it. Migrations land cleanly here even with zero-downtime deploys.
+    # Combined with RUN_MIGRATIONS_ON_BOOT=false this keeps any future
+    # multi-worker scaling safe from version-lock races.
+    preDeployCommand: python -m app.migrate
     disk:
       name: storage
       mountPath: /app/storage
@@ -58,6 +63,9 @@ services:
 
       # --- Required, set in Render dashboard (sync: false hides from blueprint) ---
       - key: DEBUG
+        value: "false"
+      # preDeployCommand handles migrations now — the app skips them on boot.
+      - key: RUN_MIGRATIONS_ON_BOOT
         value: "false"
       - key: JWT_SECRET
         generateValue: true        # Render auto-generates a 256-bit secret

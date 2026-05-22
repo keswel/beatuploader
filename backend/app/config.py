@@ -42,6 +42,12 @@ class Settings(BaseSettings):
 
     storage_dir: str = Field(default="./storage")
 
+    # Run `alembic upgrade head` on app boot. Safe for single-worker setups
+    # (the default — see Dockerfile). For multi-worker / multi-instance deploys,
+    # set RUN_MIGRATIONS_ON_BOOT=false and instead run `python -m app.migrate`
+    # as a pre-deploy job so the version lock isn't raced.
+    run_migrations_on_boot: bool = True
+
     # OAuth state JWT lifetime (security: short window between start and callback)
     oauth_state_expire_seconds: int = 600
 
