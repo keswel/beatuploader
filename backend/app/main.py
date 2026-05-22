@@ -127,4 +127,31 @@ app.include_router(api_router)
 
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
+    """Liveness probe — always returns ok if the process is up.
+
+    Use /health/ready instead if you need the DB checked too. Render's default
+    health check hits /health; a failing DB shouldn't take the container down
+    (the DB might recover and we want the request loop alive to retry).
+    """
+    return {"status": "ok"}
+
+
+@app.get("/health/ready", tags=["meta"])
+async def health_ready() -> dict:
+    """Readiness probe — checks the DB is reachable.
+
+    Use this for deploy gates / blue-green cutover so traffic doesn't shift
+    to a container whose DB connection is broken.
+    """
+    from sqlalchemy import text
+
+    from app.db import engine
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        log.warning("readiness probe failed: %s", exc)
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="database unreachable")
     return {"status": "ok"}
