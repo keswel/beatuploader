@@ -10,7 +10,7 @@
 # Run on a single worker until you swap the in-memory rate limiter + asyncio
 # background jobs for Redis + a real queue. See CLAUDE.md "Pitfalls".
 
-FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
