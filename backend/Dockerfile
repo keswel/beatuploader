@@ -19,14 +19,15 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install deps first so dependency layers cache across code changes.
+# pyproject.toml declares `packages = ["app"]`, so the editable install needs
+# the `app/` directory to exist at install time. Copy source first, then install.
+# This loses the layer-cache trick for code-only changes, but Playwright's base
+# image dominates total build time anyway (~30s pull vs ~5s pip install).
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e .
-
-# Now the app itself. Include alembic so init_db() can run migrations at boot.
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
+RUN pip install --no-cache-dir -e .
 
 # Storage volume mount point. Bind /app/storage to a persistent volume on the
 # host (Render disk, Fly volume, K8s PVC). Otherwise uploads and the BeatStars
