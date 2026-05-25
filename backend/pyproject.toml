@@ -21,7 +21,11 @@ dependencies = [
     "google-auth-oauthlib>=1.2.1",
     "google-api-python-client>=2.151.0",
     "aiofiles>=24.1.0",
-    "playwright>=1.49.0",
+    # Pinned to match the Microsoft Playwright Docker base image (v1.49.0-noble).
+    # Mismatched python client vs bundled chromium binaries causes silent
+    # launch failures — symptom is `connect_with_credentials` raising in <2s
+    # before any Playwright log fires. Bump both together when upgrading.
+    "playwright>=1.49.0,<1.50.0",
     # Sentry is optional at runtime — _init_sentry skips cleanly when DSN is
     # unset — but bundling the SDK keeps prod images self-contained.
     "sentry-sdk[fastapi]>=2.18.0",

@@ -246,7 +246,19 @@ async def beatstars_credentials(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
-        except Exception:
+        except Exception as exc:
+            # Belt-and-suspenders: log.exception sometimes gets filtered/dropped
+            # by the host's log pipeline on free tiers. Emit a guaranteed
+            # stdout line + traceback so the failure cause surfaces regardless.
+            import sys
+            import traceback
+            print(
+                f"[beatstars-credentials] worker failed: {type(exc).__name__}: {exc}",
+                file=sys.stdout,
+                flush=True,
+            )
+            traceback.print_exc(file=sys.stdout)
+            sys.stdout.flush()
             log.exception("BeatStars credentials login failed")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
