@@ -12,10 +12,44 @@ beatuploader/
 
 Frontend talks to backend via `/api/*` over JSON (multipart for uploads). Auth is JWT Bearer in `Authorization` header, token in `localStorage`.
 
+## Production (LIVE as of 2026-05-25)
+
+Deployed and serving real traffic:
+
+- **Frontend**: `https://beatuploader.app` (+ `www.`) on **Vercel** (free Hobby plan). Root dir `frontend/`, env `VITE_API_BASE=https://api.beatuploader.app/api`. `www` is primary, apex 307-redirects to it (flip in Vercel → Domains → Set as Primary if you want apex canonical).
+- **Backend**: `https://api.beatuploader.app` on **Render** (free web service, Docker). Service name `beatuploader-api`, region oregon.
+- **DB**: Render free Postgres (`beatuploader-db`). ⚠️ Free Postgres is **deleted after 90 days** (~2026-08-23) — migrate to Neon free before then (remove `databases:` block in render.yaml, set `DATABASE_URL` manually).
+- **Email**: Resend, domain `beatuploader.app` verified (SPF/DKIM via Cloudflare auto-config). SMTP creds in Render env. End-to-end verified — register/verify/reset emails arrive.
+- **DNS**: Cloudflare, all records **grey-cloud (DNS-only)** — Vercel/Render do their own TLS, proxying breaks cert issuance + OAuth redirects. Three CNAMEs: apex + www → Vercel's `0e7c0125f56bc87c.vercel-dns-017.com`, `api` → `beatuploader-api.onrender.com`.
+- **Google OAuth**: prod redirect URIs + JS origins added (sign-in + YouTube). App still in Testing mode — non-owner users need adding as test users until Google verification (4-6wk).
+- **Runbook**: `DEPLOY.md`. Deploy infra config: `render.yaml`, `frontend/vercel.json`.
+
+**Verified working in prod**: email/password register + login, email verification, password reset, Google sign-in (+ auto YouTube connect), CORS. **NOT yet verified in prod**: a real YouTube upload (do this), BeatStars (blocked — see below).
+
+### 🚨 BeatStars is BLOCKED on free-tier hosting
+
+BeatStars connect/upload **does not work on Render free tier** and likely never will. Render free = **512MB RAM + 0.1 shared CPU**. We hit both failure modes:
+
+- **Without Chromium memory flags** → instant OOM ("Ran out of memory (used over 512MB)"), container SIGKILLed, no logs flushed, request dies in ~2s.
+- **With memory flags** (`--single-process --disable-dev-shm-usage` etc., commit `b61508e`) → no OOM, but the 0.1 CPU + single-process can't drive BeatStars' heavy Angular SPA; login **hangs** indefinitely (stuck on "Connecting" past 5 min vs ~30s in dev).
+
+The vise: enough RAM headroom forces single-process, but single-process + 0.1 CPU is too slow. **No free-tier config threads this needle.** YouTube is unaffected (pure HTTP, no browser).
+
+**Paths forward (not yet decided — pick one in the new session):**
+1. **Ship YouTube-only now**, mark BeatStars "Coming soon", get test users. Recommended — don't let the hardest integration block launch. (Lowest cost/effort.)
+2. **Move backend to a ≥1GB-RAM host** (Fly/Railway ~$5-10/mo, or Render Standard 2GB $25/mo — note Render **Starter is also 512MB**, won't help) — runs existing Playwright code unchanged. For real scale, browsers belong on an autoscaling worker pool behind a job queue, NOT on the API box (see "real worker queue" TODO).
+3. **Reverse-engineer BeatStars' private HTTP API** (replace Playwright with httpx) — tiny runtime footprint, scales to thousands concurrent, but multi-day reverse-engineering with real dead-end risk (anti-bot TLS fingerprinting, undocumented Uppy/tus upload protocol). Do a DevTools-network research spike before committing.
+
+### ⚠️ Two debug commits on `main` need REVERTING before BeatStars is "done"
+
+Left in to diagnose the OOM remotely (Render free swallows tracebacks):
+- `2cf2742` — **leaks raw exception + traceback in the HTTP 500 response** of `/platforms/beatstars/credentials`. Security smell; revert to the generic `"Couldn't connect to BeatStars"` message (the stdout-print diagnostics from `0c58371` can stay or go).
+- `b61508e` — Chromium `--single-process` memory flags. Keep the genuinely-useful ones (`--disable-dev-shm-usage`, `--disable-gpu`); reconsider `--single-process`/`--no-zygote` if moving to a host where stability matters more than RAM.
+
 ## What works today
 
-- **YouTube** — OAuth connect + auto-upload of the master/tagged audio as an unlisted video. Token auto-refresh persists the new access token back to the DB (`7825e32`). End-to-end working.
-- **BeatStars** — headless login (Playwright), interactive SMS 2FA when challenged, end-to-end upload incl. cover art + license picking + price + publish. Session reused across uploads.
+- **YouTube** — OAuth connect + auto-upload of the master/tagged audio as an unlisted video. Token auto-refresh persists the new access token back to the DB (`7825e32`). End-to-end working **in dev**; prod-verify a real upload.
+- **BeatStars** — headless login (Playwright), interactive SMS 2FA when challenged, end-to-end upload incl. cover art + license picking + price + publish. Session reused across uploads. **Works in dev; BLOCKED in prod on free-tier hosting — see "Production" above.**
 - **SoundCloud** — registry stub, raises `NotImplementedError`. Intentionally deferred.
 - **Spotify / Audiomack / Bandcamp** — enum entries only, no connector files yet.
 
@@ -38,7 +72,7 @@ npm run dev                                    # http://localhost:5173
 **First-time setup:**
 - Backend venv: `python -m venv .venv && .venv\Scripts\python.exe -m pip install -e .`
 - Playwright: `playwright install chromium` (~150MB)
-- DB: created/migrated automatically on first boot via `init_db()` (runs `alembic upgrade head`). In prod we instead set `RUN_MIGRATIONS_ON_BOOT=false` and call `python -m app.migrate` as a Render pre-deploy step — see "Pitfalls / Multi-worker migration safety" and `render.yaml`.
+- DB: created/migrated automatically on first boot via `init_db()` (runs `alembic upgrade head`), gated by `RUN_MIGRATIONS_ON_BOOT` (true in dev and on current free-tier prod). On a paid Render plan, switch to `RUN_MIGRATIONS_ON_BOOT=false` + `preDeployCommand: python -m app.migrate` — see "Pitfalls / Alembic migrations on boot" and `render.yaml`.
 
 **Current dev setup runs on port 8001**, not 8000 — hardcoded in `start-backend.ps1`. There's no `backend/.env` — the user is running on **all dev defaults**. `BACKEND_BASE_URL=http://localhost:8001` is needed for OAuth redirect URIs to line up; `frontend/.env.local` has `VITE_API_BASE=http://127.0.0.1:8001/api`. Why 8001 in the first place: Windows leaves zombie LISTENING entries on 8000 for many minutes after a hard kill. If you change the port, update `start-backend.ps1`, the env override, `frontend/.env.local`, and the Google Console redirect URIs together.
 
@@ -270,9 +304,9 @@ Beat
 
 ## Pitfalls
 
-- **Alembic single-writer / multi-worker safety** — `init_db()` runs `alembic upgrade head` on every app boot, gated by the `RUN_MIGRATIONS_ON_BOOT` flag (default true for dev). The Dockerfile uses one uvicorn worker so that's safe. For Render and any other multi-worker / multi-instance deploy: set `RUN_MIGRATIONS_ON_BOOT=false` and run `python -m app.migrate` as a pre-deploy step (already wired in `render.yaml` as `preDeployCommand`). Otherwise N workers race the alembic version lock on startup.
+- **Alembic migrations on boot (current free-tier config)** — `init_db()` runs `alembic upgrade head` on every app boot, gated by `RUN_MIGRATIONS_ON_BOOT` (currently `"true"` in `render.yaml`). Render free tier **does not support `preDeployCommand`**, so we run migrations on boot. Safe because free tier is pinned to a single instance — no version-lock race. **When you move to a paid plan**, flip `RUN_MIGRATIONS_ON_BOOT=false` and re-add `preDeployCommand: python -m app.migrate` to `render.yaml` (commented guidance is in the file) to avoid multi-worker races.
 - **No real worker queue** — `asyncio.create_task` lives in the process. Process crash = in-flight uploads lost. The `_in_flight` set holds references but only prevents GC; doesn't survive a restart.
-- **DATABASE_URL normalization** — `app/db._async_database_url` rewrites `postgres://` and `postgresql://` to `postgresql+asyncpg://`, and strips libpq-only query params (`sslmode`, `channel_binding`, `target_session_attrs`, `gssencmode`). asyncpg silently ignores those, which would mean falling back to plaintext on a TLS-only server. For any non-localhost Postgres URL we also pass `connect_args={"ssl": True}` to actually negotiate TLS. Keep this in mind if you touch `db.py`.
+- **DATABASE_URL normalization + SSL** — `app/db._async_database_url` rewrites `postgres://` and `postgresql://` to `postgresql+asyncpg://`, and strips libpq-only query params (`sslmode`, `channel_binding`, `target_session_attrs`, `gssencmode`) that asyncpg ignores. SSL is then chosen by hostname shape in `db.py`: **single-label hosts** (e.g. Render-internal `dpg-xxx-a`, no TLD) get an `ssl.CERT_NONE` context — TLS happens but cert verification is skipped, because Render's internal Postgres uses a self-signed cert (this was a real prod boot crash, fixed `67eba1a`). **Public hosts** with a TLD (Neon, Supabase, Render external URL) get `ssl=True` (full verification). Localhost/127.0.0.1 skip SSL entirely. Keep this branching if you touch `db.py`.
 - **BeatStars selectors can break anytime** — Angular CSS classes (`_ngcontent-ng-c*`) change every BeatStars deploy. We pin to `data-qa`, `data-cy`, IDs, and visible text. If something stops working, capture a diagnostic and check the selectors.
 - **Cropper / Uppy editor blocking** — both Uppy's built-in editor (`.uppy-DashboardContent-panel--editor`) and BeatStars's post-upload Cropper.js (`.cropper-modal`) intercept clicks. Always dismiss them before trying to click anything else. The artwork upload + license toggle paths both run `_close_cropper_if_open` defensively.
 - **Material slide-toggle clicks** — `mat-slide-toggle` wraps a hidden `<input role="switch">`. Clicking the wrapper through Playwright's `.click()` doesn't reliably register with Angular's change detection. Use `page.evaluate` to call `.click()` on the input directly. See `_enable_license`.
@@ -289,7 +323,7 @@ Ranked roughly by impact. Items struck from the previous version of this list ha
 - **More platforms** — SoundCloud (OAuth — SoundCloud API registrations are gated and may need outreach), Spotify (via DistroKid), Audiomack (OAuth), Bandcamp (headless). All zero progress beyond the SoundCloud `NotImplementedError` stub.
 - **Real worker queue** — arq, RQ, or Celery. Today's `asyncio.create_task` loses in-flight uploads on every container restart (Render redeploys, scale events).
 - **BeatStars progress reporting** — connector accepts a `progress_cb` per the new base.py signature but doesn't call it yet. Uppy emits progress events on `.uppy-StatusBar`; capture via `page.evaluate` and feed the callback (YouTube already does this, see `youtube.py::_do_upload`).
-- **File storage on object store** — `services/storage.py` writes to disk under `STORAGE_DIR`. Fine on Render's persistent disk for MVP; doesn't scale across instances. Swap for R2/S3 via boto3 / aioboto3 when needed.
+- **File storage on object store** — `services/storage.py` writes to disk under `STORAGE_DIR`. ⚠️ **Render free tier has NO persistent disk** — uploads written to `/app/storage` are lost on every restart/redeploy. Acceptable for the free-tier MVP since files stream straight to YouTube; the casualty is retry-from-disk (`POST /uploads/{id}/retry` reuses on-disk files — those won't exist after a restart). Swap for R2/S3 via boto3 / aioboto3 when scaling, or re-add a `disk:` block to `render.yaml` on a paid plan.
 - **HttpOnly cookie sessions** — token is in `localStorage`, vulnerable to XSS exfiltration. Move to HttpOnly+Secure+SameSite cookies if/when we accept user-rendered HTML or third-party scripts.
 - **Transactional email beyond verification/reset** — "your upload is live", weekly digest. Wired SMTP service is generic enough that it's just templating + the right trigger points.
 - **Stripe / billing** — `User.plan` exists but is just a string with no enforcement.
@@ -299,13 +333,20 @@ Ranked roughly by impact. Items struck from the previous version of this list ha
 
 These were on the list and are now resolved — keep an eye out so you don't re-add them.
 
-- ~~**Multi-worker migration safety**~~ — `RUN_MIGRATIONS_ON_BOOT=false` + `python -m app.migrate` as a Render `preDeployCommand`. See Pitfalls.
+- ~~**Multi-worker migration safety**~~ — implemented (`RUN_MIGRATIONS_ON_BOOT` flag + standalone `python -m app.migrate`), but **currently running migrations on boot** on free tier since Render free can't use `preDeployCommand`. Re-enable the pre-deploy path on a paid plan. See Pitfalls.
 - ~~**Real progress reporting (YouTube)**~~ — `MediaUploadProgress.progress()` per chunk → `progress_cb` → `job.targets[provider].progress`, throttled to ≥5% deltas. BeatStars still pending (see Known gaps above).
 - ~~**Email verification**~~ — full register → email → /verify-email → stamp `email_verified_at` flow, resend endpoint, dismissible dashboard banner. See "Auth / Email verification flow".
 - ~~**Tests**~~ — 42 tests covering auth, password policy, security primitives, DB URL normalization, rate limiter behind a proxy, email verification. Run from `backend/`: `python -m pytest tests/`.
 - ~~**Mobile UX pass**~~ — hamburger drawer (`components/mobile-nav.tsx`) with the same workspace nav, upload page tightening, PageHeader stacks on mobile.
 - ~~**Reverse-proxy IP handling**~~ — Dockerfile runs uvicorn with `--proxy-headers --forwarded-allow-ips '*'`; rate limiter behavior covered by tests in `tests/test_rate_limit.py`. Note: this still requires the upstream proxy (Render/Cloudflare/etc.) to be in front; the test verifies the *limiter side* of the contract.
-- ~~**Production deployment**~~ — `render.yaml`, `vercel.json`, `DEPLOY.md` runbook all in place.
+- ~~**Production deployment**~~ — **LIVE** at `beatuploader.app` (Vercel) + `api.beatuploader.app` (Render free) + Resend email + Cloudflare DNS. See the "Production (LIVE...)" section near the top for the full topology, the BeatStars free-tier blocker, and the two debug commits awaiting revert.
+
+### Docker / deploy gotchas learned the hard way (2026-05-25 deploy session)
+
+The first prod deploy took 5 build iterations. Don't re-introduce these:
+- **Base image must be Python ≥3.11.** Code uses `from datetime import UTC` (3.11+) in 10 files. The Playwright `-jammy` image ships Python 3.10 → `ImportError`. We use **`mcr.microsoft.com/playwright/python:v1.49.0-noble`** (Ubuntu 24.04, Python 3.12). Don't drop to `-jammy`.
+- **Playwright pinned to `>=1.49.0,<1.50.0`** in `pyproject.toml` to match the base image's bundled Chromium. Unpinned, pip grabbed 1.60 against 1.49 binaries (version-mismatch launch failures). Bump image tag + pin together.
+- **Dockerfile copies `app/` BEFORE `pip install -e .`** — `pyproject.toml` declares `packages = ["app"]`, so the editable install needs the source present. The old deps-first layer-cache ordering broke the build.
 
 ## Reference: Google Cloud OAuth setup
 
