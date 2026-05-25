@@ -46,6 +46,27 @@ def browser_session(
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
+                # Memory-reduction flags for low-RAM containers (e.g. Render's
+                # 512MB instances). Without these Chromium OOM-kills the whole
+                # container the moment it launches.
+                #   --disable-dev-shm-usage: Docker gives /dev/shm only 64MB;
+                #     this routes shared memory to /tmp instead so Chromium
+                #     doesn't crash/balloon when it fills.
+                #   --single-process + --no-zygote: collapse Chromium's
+                #     multi-process model into one, cutting baseline RSS hard.
+                #   The rest disable subsystems we never use in headless scrape.
+                "--disable-dev-shm-usage",
+                "--single-process",
+                "--no-zygote",
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-default-apps",
+                "--disable-sync",
+                "--mute-audio",
+                "--no-first-run",
+                "--no-default-browser-check",
             ],
         )
         try:
