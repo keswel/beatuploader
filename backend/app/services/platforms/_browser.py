@@ -46,18 +46,16 @@ def browser_session(
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
-                # Memory-reduction flags for low-RAM containers (e.g. Render's
-                # 512MB instances). Without these Chromium OOM-kills the whole
-                # container the moment it launches.
+                # Footprint-reduction flags for containerized Chromium. These
+                # are safe and standard for headless scrapes.
                 #   --disable-dev-shm-usage: Docker gives /dev/shm only 64MB;
                 #     this routes shared memory to /tmp instead so Chromium
-                #     doesn't crash/balloon when it fills.
-                #   --single-process + --no-zygote: collapse Chromium's
-                #     multi-process model into one, cutting baseline RSS hard.
-                #   The rest disable subsystems we never use in headless scrape.
+                #     doesn't crash/balloon when it fills. Most important one.
+                #   The rest disable subsystems we never use headless.
+                # NOTE: --single-process/--no-zygote were tried here to fit
+                # Render's 512MB free tier but made BeatStars' heavy Angular
+                # SPA hang on 0.1 CPU. Removed — the real fix is a >=1GB host.
                 "--disable-dev-shm-usage",
-                "--single-process",
-                "--no-zygote",
                 "--disable-gpu",
                 "--disable-software-rasterizer",
                 "--disable-extensions",

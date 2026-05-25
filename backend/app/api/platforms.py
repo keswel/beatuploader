@@ -247,10 +247,9 @@ async def beatstars_credentials(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
         except Exception as exc:
-            # TEMPORARY DEBUG: Render free-tier log pipeline is swallowing our
-            # tracebacks, so surface the real exception in the HTTP response to
-            # debug remotely. REVERT to the generic message once diagnosed —
-            # exposing exception internals to clients is a security smell.
+            # Belt-and-suspenders: log.exception sometimes gets filtered/dropped
+            # by the host's log pipeline on free tiers. Emit a guaranteed
+            # stdout line + traceback so the failure cause surfaces regardless.
             import sys
             import traceback
             print(
@@ -261,10 +260,9 @@ async def beatstars_credentials(
             traceback.print_exc(file=sys.stdout)
             sys.stdout.flush()
             log.exception("BeatStars credentials login failed")
-            tb = traceback.format_exc()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"DEBUG {type(exc).__name__}: {exc}\n{tb[-1500:]}",
+                detail="Couldn't connect to BeatStars",
             )
 
         await _persist_beatstars_connection(

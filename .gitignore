@@ -29,5 +29,8 @@
 # Uploaded files & diagnostics
 storage/
 
+# Network captures (contain live tokens/secrets — never commit)
+*.har
+
 # Local scratch / smoke scripts (not part of the test suite)
 backend/_smoke.py
