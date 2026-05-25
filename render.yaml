@@ -54,11 +54,11 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: true
-    # Render runs preDeployCommand against the new image BEFORE traffic shifts
-    # to it. Migrations land cleanly here even with zero-downtime deploys.
-    # Combined with RUN_MIGRATIONS_ON_BOOT=false this keeps any future
-    # multi-worker scaling safe from version-lock races.
-    preDeployCommand: python -m app.migrate
+    # Migrations run on boot via init_db() — see RUN_MIGRATIONS_ON_BOOT below.
+    # Free tier doesn't support preDeployCommand, but since we're pinned to a
+    # single instance there's no version-lock race to worry about. When you
+    # upgrade to a paid plan, re-add `preDeployCommand: python -m app.migrate`
+    # and flip RUN_MIGRATIONS_ON_BOOT back to "false".
     # No `disk:` block — free tier doesn't support persistent disks. The app
     # falls back to writing under /app/storage on the container's ephemeral
     # FS. Files are lost on restart; that's accepted for the free-tier MVP.
@@ -74,9 +74,11 @@ services:
       # --- Required, set in Render dashboard (sync: false hides from blueprint) ---
       - key: DEBUG
         value: "false"
-      # preDeployCommand handles migrations now — the app skips them on boot.
+      # Free tier: migrations run on boot via init_db(). Safe because we're
+      # pinned to a single instance — no version-lock race. Flip to "false"
+      # when you move to a paid plan with preDeployCommand.
       - key: RUN_MIGRATIONS_ON_BOOT
-        value: "false"
+        value: "true"
       - key: JWT_SECRET
         generateValue: true        # Render auto-generates a 256-bit secret
       - key: TOKEN_ENCRYPTION_KEY
