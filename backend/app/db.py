@@ -1,3 +1,4 @@
+import ssl
 from collections.abc import AsyncGenerator
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
@@ -46,11 +47,27 @@ def _async_database_url(url: str) -> str:
 _engine_kwargs: dict = {"echo": False, "future": True, "pool_pre_ping": True}
 
 # asyncpg wants SSL configured via connect_args when talking to a remote DB.
-# Render Postgres requires TLS; the public hostname won't accept plaintext.
-# Skip for localhost so dev keeps working without certs.
+# Two cases to handle:
+#
+#   1. Public hosts (Neon, Supabase, Render *external* URL) — verify normally.
+#   2. Single-label hostnames like Render's internal `dpg-<id>-a` — these run
+#      over Render's private network with self-signed certs. We want TLS
+#      (asyncpg defaults to plaintext if ssl is unset) but verification fails.
+#      Build a context that does TLS without verification.
+#
+# Localhost / 127.0.0.1 skip SSL entirely so dev keeps working without certs.
 _db_url = _async_database_url(settings.database_url)
-if _db_url.startswith("postgresql+asyncpg://") and "localhost" not in _db_url and "127.0.0.1" not in _db_url:
-    _engine_kwargs["connect_args"] = {"ssl": True}
+if _db_url.startswith("postgresql+asyncpg://"):
+    _host = urlsplit(_db_url).hostname or ""
+    if _host and _host not in ("localhost", "127.0.0.1"):
+        if "." not in _host:
+            # Internal/private hostname — self-signed cert is expected.
+            _ssl_ctx = ssl.create_default_context()
+            _ssl_ctx.check_hostname = False
+            _ssl_ctx.verify_mode = ssl.CERT_NONE
+            _engine_kwargs["connect_args"] = {"ssl": _ssl_ctx}
+        else:
+            _engine_kwargs["connect_args"] = {"ssl": True}
 
 engine = create_async_engine(_db_url, **_engine_kwargs)
 
