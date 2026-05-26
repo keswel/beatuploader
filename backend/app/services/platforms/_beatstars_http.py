@@ -38,11 +38,13 @@ from app.services.platforms.base import (
     UploadHandle,
 )
 
-# Pure mapping helpers shared with the Playwright path. beatstars.py has no
-# top-level import of this module (its dispatch imports us lazily), so there's
-# no import cycle.
+# Pure mapping helpers + SMS challenge types shared with the Playwright path.
+# beatstars.py has no top-level import of this module (its dispatch imports us
+# lazily), so there's no import cycle.
 from app.services.platforms.beatstars import (
     LICENSE_LABEL,
+    SmsCancelled,
+    SmsHandler,
     clamp_tags,
     normalize_key,
     pick_licenses,
@@ -106,6 +108,25 @@ def _new_client() -> httpx.AsyncClient:
 
 class BeatStarsApiError(RuntimeError):
     """Any BeatStars HTTP/GraphQL failure. Message is safe to surface to users."""
+
+
+class _MfaRequired(Exception):
+    """Internal signal: the password grant needs an SMS code to complete.
+
+    BeatStars triggers SMS 2FA for logins from unfamiliar devices/IPs (notably
+    our server's datacenter IP). The token endpoint returns an error carrying
+    code ``MFA_VERIFICATION_ACTION`` and auto-sends the SMS; we then re-POST the
+    same grant with an extra ``code`` field.
+    """
+
+    def __init__(self, hint: str | None = None):
+        super().__init__("MFA required")
+        self.hint = hint
+
+
+# Substring that marks an MFA-required response (from the login bundle's auth
+# error-code enum).
+_MFA_SIGNAL = "MFA_VERIFICATION_ACTION"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -226,27 +247,42 @@ def _session_from_tokens(tokens: dict, *, account_label: str | None = None) -> d
 
 
 async def _password_grant(
-    client: httpx.AsyncClient, username: str, password: str
+    client: httpx.AsyncClient,
+    username: str,
+    password: str,
+    *,
+    code: str | None = None,
 ) -> dict:
+    """Run the OAuth password grant. Pass ``code`` to complete an SMS challenge.
+
+    The same ``client`` (and its cookie jar) must be reused across the initial
+    grant and the code-bearing retry — BeatStars ties the MFA session to cookies
+    set on the first attempt (the web client sends ``withCredentials: true``).
+
+    Raises ``_MfaRequired`` when BeatStars wants an SMS code.
+    """
+    data = {
+        "grant_type": "password",
+        "username": username,
+        "password": password,
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "origin": "https://www.beatstars.com/",
+    }
+    if code:
+        data["code"] = code
     try:
-        resp = await client.post(
-            TOKEN_URL,
-            data={
-                "grant_type": "password",
-                "username": username,
-                "password": password,
-                "client_id": CLIENT_ID,
-                "client_secret": CLIENT_SECRET,
-                "origin": "https://www.beatstars.com/",
-            },
-            headers={"Origin": OAUTH_ORIGIN},
-        )
+        resp = await client.post(TOKEN_URL, data=data, headers={"Origin": OAUTH_ORIGIN})
     except httpx.HTTPError as exc:
         raise BeatStarsApiError(
             "Couldn't reach BeatStars to sign in — try again in a moment."
         ) from exc
     if resp.status_code == 200:
         return resp.json()
+
+    body = resp.text or ""
+    if _MFA_SIGNAL in body:
+        raise _MfaRequired(_extract_message(resp))
     if resp.status_code in (400, 401):
         # OAuth returns 400 invalid_grant for genuinely bad credentials.
         raise BeatStarsApiError("Wrong BeatStars email or password")
@@ -255,6 +291,21 @@ async def _password_grant(
         f"BeatStars sign-in is temporarily unavailable (HTTP {resp.status_code}) — "
         "try again shortly."
     )
+
+
+def _extract_message(resp: httpx.Response) -> str | None:
+    """Best-effort human hint from an error body (e.g. 'code sent to ***1234')."""
+    try:
+        j = resp.json()
+    except Exception:  # noqa: BLE001
+        return None
+    for path in (("message",), ("error", "message"), ("response", "data", "message")):
+        cur = j
+        for key in path:
+            cur = cur.get(key) if isinstance(cur, dict) else None
+        if isinstance(cur, str) and cur.strip():
+            return cur.strip()[:160]
+    return None
 
 
 async def _refresh_grant(client: httpx.AsyncClient, refresh_token: str) -> dict:
@@ -276,8 +327,16 @@ async def _refresh_grant(client: httpx.AsyncClient, refresh_token: str) -> dict:
     return resp.json()
 
 
-async def login(username: str, password: str) -> dict:
-    """Authenticate and return a fresh session dict. Raises BeatStarsApiError."""
+async def login(
+    username: str, password: str, *, sms_handler: SmsHandler | None = None
+) -> dict:
+    """Authenticate and return a fresh session dict. Raises BeatStarsApiError.
+
+    If BeatStars challenges with SMS 2FA and ``sms_handler`` is provided, we relay
+    the challenge through it (the same callbacks the Playwright path uses): notify
+    on detection, block for the code, then complete the grant. With no handler a
+    challenge is a clean error.
+    """
     async with _new_client() as client:
         label: str | None = None
         # Best-effort account-existence check — gives a clean "no account" error
@@ -299,9 +358,45 @@ async def login(username: str, password: str) -> dict:
                 raise BeatStarsApiError("No BeatStars account found for that email")
             label = (info.get("profileDetails") or {}).get("username")
 
-        tokens = await _password_grant(client, username, password)
+        try:
+            tokens = await _password_grant(client, username, password)
+        except _MfaRequired as mfa:
+            tokens = await _complete_mfa(
+                client, username, password, mfa.hint, sms_handler
+            )
         session = _session_from_tokens(tokens, account_label=label or username)
         return session
+
+
+async def _complete_mfa(
+    client: httpx.AsyncClient,
+    username: str,
+    password: str,
+    hint: str | None,
+    sms_handler: SmsHandler | None,
+) -> dict:
+    """Relay the SMS challenge through the handler and finish the grant."""
+    if sms_handler is None:
+        raise BeatStarsApiError(
+            "BeatStars wants an SMS verification code, but no handler was available "
+            "to relay it."
+        )
+    # Tell the API layer a code is needed (it returns sms_required to the client),
+    # then block — off the event loop — until the code arrives via /beatstars/sms.
+    sms_handler.on_detected(hint)
+    code = await asyncio.to_thread(sms_handler.get_code)
+    if not code or not str(code).strip():
+        raise SmsCancelled("SMS challenge was cancelled or timed out")
+    try:
+        # Same client → the MFA-session cookie from the first attempt is reused.
+        return await _password_grant(
+            client, username, password, code=str(code).strip()
+        )
+    except (BeatStarsApiError, _MfaRequired) as exc:
+        raise BeatStarsApiError(
+            "BeatStars rejected the verification code (or it expired). "
+            "Try connecting again for a fresh code."
+        ) from exc
 
 
 async def _ensure_token(
@@ -571,16 +666,17 @@ def _build_contracts(track_id: str, meta: BeatMetadata, menu: list[dict]) -> lis
 
 
 async def connect_with_credentials(
-    *, username: str, password: str
+    *, username: str, password: str, sms_handler: SmsHandler | None = None
 ) -> tuple[str, str, str]:
     """Validate creds via the HTTP login. Returns (password_enc, session_enc, label).
 
     Same return contract as the Playwright connect_with_credentials so the API
-    layer is transport-agnostic.
+    layer is transport-agnostic. ``sms_handler`` relays a 2FA challenge if one
+    fires (logins from the server IP usually trigger it).
     """
     from app.security import encrypt_token
 
-    session = await login(username, password)
+    session = await login(username, password, sms_handler=sms_handler)
     label = session.get("account_label") or username
     return (
         encrypt_token(password),

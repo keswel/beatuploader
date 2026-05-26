@@ -333,6 +333,57 @@ async def test_password_grant_5xx_is_not_bad_credentials(monkeypatch):
         await bh.login("real@example.com", "correct-pw")
 
 
+async def test_login_sms_2fa_flow(monkeypatch):
+    """MFA-required first grant → handler relays the SMS code → second grant
+    (with code) succeeds. The same client/cookie jar spans both calls."""
+    from app.services.platforms.beatstars import SmsHandler
+
+    detected: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "auth/graphql" in url:
+            return httpx.Response(200, json={"data": {"identifierAvailable": {
+                "available": False, "profileDetails": {"username": "keswel"}}}})
+        # token endpoint
+        sent_code = b"code=" in request.content
+        if not sent_code:
+            # First attempt → MFA required (SMS auto-sent)
+            return httpx.Response(400, json={
+                "code": "MFA_VERIFICATION_ACTION",
+                "message": "We sent a code to your phone ending in 1234",
+            })
+        # Second attempt carries the code → issue tokens
+        return httpx.Response(200, json={
+            "access_token": _fake_jwt("MR777"), "refresh_token": "r2"})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(bh, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+
+    sms = SmsHandler(
+        on_detected=lambda hint: detected.append(hint),
+        get_code=lambda: "654321",
+    )
+    session = await bh.login("real@example.com", "pw", sms_handler=sms)
+
+    assert session["member_id"] == "MR777"  # completed via the code
+    assert detected == ["We sent a code to your phone ending in 1234"]  # hint relayed
+
+
+async def test_login_mfa_without_handler_is_clear_error(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "auth/graphql" in str(request.url):
+            return httpx.Response(200, json={"data": {"identifierAvailable": {
+                "available": False, "profileDetails": {"username": "x"}}}})
+        return httpx.Response(400, json={"code": "MFA_VERIFICATION_ACTION"})
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(bh, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+
+    with pytest.raises(bh.BeatStarsApiError, match="SMS verification code"):
+        await bh.login("real@example.com", "pw")  # no handler
+
+
 async def test_login_no_account(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         if "auth/graphql" in str(request.url):

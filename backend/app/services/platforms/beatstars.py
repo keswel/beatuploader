@@ -1183,7 +1183,7 @@ async def connect_with_credentials(
         from app.services.platforms import _beatstars_http
 
         return await _beatstars_http.connect_with_credentials(
-            username=username, password=password
+            username=username, password=password, sms_handler=sms_handler
         )
 
     connector = BeatStarsConnector()
