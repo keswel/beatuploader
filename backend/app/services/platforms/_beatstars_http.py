@@ -287,9 +287,15 @@ async def _password_grant(
     body = resp.text or ""
     if _MFA_SIGNAL in body:
         raise _MfaRequired(_extract_message(resp))
+    if "messages sent today" in body.lower() or "maximum number of messages" in body.lower():
+        # BeatStars caps verification SMS per account per day.
+        raise BeatStarsApiError(
+            "BeatStars has hit its daily SMS verification limit for this account. "
+            "Try connecting again tomorrow."
+        )
     if resp.status_code in (400, 401):
         # TEMP DIAGNOSTIC: surface the raw body to tell genuine bad credentials
-        # apart from a lockout / throttle we'd otherwise mislabel. REVERT to
+        # apart from a throttle/other error we'd otherwise mislabel. REVERT to
         # "Wrong BeatStars email or password" once confirmed.
         raise BeatStarsApiError(f"[diag] grant HTTP {resp.status_code}: {body[:350]}")
     # 5xx / gateway timeout — NOT a credential problem; don't mislabel it.
@@ -368,7 +374,11 @@ async def login(
             tokens = await _password_grant(client, username, password)
         except _MfaRequired as mfa:
             tokens = await _complete_mfa(
-                client, username, password, mfa.hint, sms_handler
+                client, username, password, mfa.hint, sms_handler,
+                # verifyMfa keys off the resolved BeatStars username (the web
+                # client uses profileDetails.username || email), NOT the email
+                # used for the password grant.
+                verify_identifier=label or username,
             )
         session = _session_from_tokens(tokens, account_label=label or username)
         return session
@@ -380,6 +390,8 @@ async def _complete_mfa(
     password: str,
     hint: str | None,
     sms_handler: SmsHandler | None,
+    *,
+    verify_identifier: str | None = None,
 ) -> dict:
     """Relay the SMS challenge through the handler and finish the grant."""
     if sms_handler is None:
@@ -399,10 +411,11 @@ async def _complete_mfa(
     # with the pin — that just re-triggers a new SMS). verifyMfa returns either a
     # one-time code to hand back to the grant, or a boolean (MFA satisfied for the
     # session via the shared cookie jar). Same client throughout so cookies carry.
+    identifier = verify_identifier or username
     try:
         data = await _graphql(
             client, None, AUTH_GRAPHQL, "verifyMfa", M_VERIFY_MFA,
-            {"verifyMfaRequest": {"identifier": username, "pin": pin}},
+            {"verifyMfaRequest": {"identifier": identifier, "pin": pin}},
             origin=OAUTH_ORIGIN,
         )
     except (BeatStarsApiError, _MfaRequired) as exc:
@@ -410,7 +423,7 @@ async def _complete_mfa(
         # see the cause (identifier shape vs challenge linkage). REVERT to the
         # generic message once the live flow is confirmed.
         raise BeatStarsApiError(
-            f"[diag] verifyMfa rejected (identifier={username!r}): {exc}"
+            f"[diag] verifyMfa rejected (identifier={identifier!r}): {exc}"
         ) from exc
 
     verified = data.get("verifyMfa")

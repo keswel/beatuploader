@@ -375,8 +375,9 @@ async def test_login_sms_2fa_flow(monkeypatch):
 
     assert session["member_id"] == "MR777"  # completed via verifyMfa → grant
     assert detected == ["We sent a code to your phone ending in 1234"]  # hint relayed
-    # The pin went to verifyMfa as {identifier, pin}
-    assert verify_vars["verifyMfaRequest"] == {"identifier": "real@example.com", "pin": "4821"}
+    # verifyMfa keys off the RESOLVED username from identifierAvailable
+    # (profileDetails.username = "keswel"), not the email used for the grant.
+    assert verify_vars["verifyMfaRequest"] == {"identifier": "keswel", "pin": "4821"}
 
 
 async def test_login_mfa_without_handler_is_clear_error(monkeypatch):
