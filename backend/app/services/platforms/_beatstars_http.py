@@ -288,8 +288,10 @@ async def _password_grant(
     if _MFA_SIGNAL in body:
         raise _MfaRequired(_extract_message(resp))
     if resp.status_code in (400, 401):
-        # OAuth returns 400 invalid_grant for genuinely bad credentials.
-        raise BeatStarsApiError("Wrong BeatStars email or password")
+        # TEMP DIAGNOSTIC: surface the raw body to tell genuine bad credentials
+        # apart from a lockout / throttle we'd otherwise mislabel. REVERT to
+        # "Wrong BeatStars email or password" once confirmed.
+        raise BeatStarsApiError(f"[diag] grant HTTP {resp.status_code}: {body[:350]}")
     # 5xx / gateway timeout — NOT a credential problem; don't mislabel it.
     raise BeatStarsApiError(
         f"BeatStars sign-in is temporarily unavailable (HTTP {resp.status_code}) — "
