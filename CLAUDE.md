@@ -50,7 +50,7 @@ The two temporary OOM-diagnosis commits are reverted (commit `513d4e7`): `/platf
 
 - **YouTube** — OAuth connect + auto-upload of the master/tagged audio as an unlisted video. Token auto-refresh persists the new access token back to the DB (`7825e32`). End-to-end working **in dev**; prod-verify a real upload.
 - **BeatStars** — **HTTP/GraphQL connector** (`_beatstars_http.py`, the default) — password-grant login, full upload (assets→S3→attach→save→publish), license/price selection, genre-enum resolution. Runs on free-tier hosting (no browser). **Unit-tested against the captured contract; pending a live end-to-end test.** Legacy Playwright path (headless login + SMS 2FA + DOM-driven upload, cover art + license picking) kept behind `BEATSTARS_USE_HTTP=false`. See "Production → BeatStars now runs over its private HTTP API" above.
-- **SoundCloud** — registry stub, raises `NotImplementedError`. Intentionally deferred.
+- **SoundCloud** — **OAuth2 connector built** (`soundcloud.py`): authorization-code + PKCE via `secure.soundcloud.com`, multipart upload to `api.soundcloud.com/tracks`, token refresh. Wired (registry + `/soundcloud/callback`). **Blocked on credentials, NOT code** — registering an app needs an active **Artist Pro** account; once `SOUNDCLOUD_CLIENT_ID`/`SECRET` are set it's connectable. Our use case is explicitly permitted by SoundCloud's API terms ("sale of an app with an Upload integration" + "promote content via authenticated access to the user's account"). Unit-tested against a mock transport; **not yet verified against the live API** (auth-header scheme `OAuth` vs `Bearer`, `/tracks` field names — iterate once creds exist).
 - **Spotify / Audiomack / Bandcamp** — enum entries only, no connector files yet.
 
 ## Run dev
@@ -105,7 +105,7 @@ PlatformConnector
 - `headless` — BeatStars (Playwright-driven, working end-to-end)
 - `api_key` — preset token (unused)
 
-**Registry** is in `registry.py`. Currently wired: `youtube`, `beatstars`. Stubs raising `NotImplementedError`: `soundcloud`. Other providers in `PlatformProvider` enum (spotify, audiomack, bandcamp) aren't even stubbed yet — adding any of them just requires a file and registry entry.
+**Registry** is in `registry.py`. Currently wired: `youtube`, `beatstars`, `soundcloud` (the last needs `SOUNDCLOUD_CLIENT_ID`/`SECRET` to actually connect). Other providers in `PlatformProvider` enum (spotify, audiomack, bandcamp) aren't even stubbed yet — adding any of them just requires a file and registry entry.
 
 ### Upload pipeline (`backend/app/api/uploads.py` + `services/jobs.py`)
 
@@ -322,7 +322,7 @@ Ranked roughly by impact. Items struck from the previous version of this list ha
 
 - **BeatStars SMS 2FA selector verification** — the interactive flow is built end-to-end (challenge store + `SmsHandler` callbacks into `_do_login` + two-stage frontend dialog). Selectors for the SMS code input (`input[autocomplete="one-time-code"]`, `input[name="code"]`, etc.) and submit button are best-guesses since the 2FA page only renders when BeatStars actually challenges us. On the first real challenge, the worker writes a `sms-*.html` diagnostic — use it to tighten `SMS_CODE_INPUT_SELECTORS` / `SMS_SUBMIT_SELECTORS` in `services/platforms/beatstars.py`.
 - **Redis-backed rate limiter** — current limiter is in-memory and per-process. Fine for the single-uvicorn-worker MVP; not safe for multi-worker or multi-instance prod. Swap for `slowapi + limits` with a Redis storage backend before scaling out.
-- **More platforms** — SoundCloud (OAuth — SoundCloud API registrations are gated and may need outreach), Spotify (via DistroKid), Audiomack (OAuth), Bandcamp (headless). All zero progress beyond the SoundCloud `NotImplementedError` stub.
+- **More platforms** — SoundCloud connector is **built** (see "What works today"), pending an Artist Pro account + app credentials to go live. Still nothing for Spotify (via DistroKid), Audiomack (OAuth), Bandcamp (headless).
 - **Real worker queue** — arq, RQ, or Celery. Today's `asyncio.create_task` loses in-flight uploads on every container restart (Render redeploys, scale events).
 - **BeatStars progress reporting** — connector accepts a `progress_cb` per the new base.py signature but doesn't call it yet. Uppy emits progress events on `.uppy-StatusBar`; capture via `page.evaluate` and feed the callback (YouTube already does this, see `youtube.py::_do_upload`).
 - **File storage on object store** — `services/storage.py` writes to disk under `STORAGE_DIR`. ⚠️ **Render free tier has NO persistent disk** — uploads written to `/app/storage` are lost on every restart/redeploy. Acceptable for the free-tier MVP since files stream straight to YouTube; the casualty is retry-from-disk (`POST /uploads/{id}/retry` reuses on-disk files — those won't exist after a restart). Swap for R2/S3 via boto3 / aioboto3 when scaling, or re-add a `disk:` block to `render.yaml` on a paid plan.

@@ -31,6 +31,7 @@ from app.services.platforms.beatstars import (
     SmsHandler,
     connect_with_credentials as beatstars_connect_with_credentials,
 )
+from app.services.platforms.soundcloud import verify_state as soundcloud_verify_state
 from app.services.platforms.youtube import verify_state
 from app.services.rate_limit import (
     beatstars_credentials_limiter,
@@ -150,6 +151,62 @@ async def youtube_callback(
 
     await db.commit()
     return _redirect({"status": "connected", "provider": "youtube"})
+
+
+@router.get("/soundcloud/callback")
+async def soundcloud_callback(
+    db: DbSession,
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+) -> RedirectResponse:
+    settings = get_settings()
+    frontend = settings.frontend_base_url.rstrip("/")
+
+    def _redirect(params: dict[str, str]) -> RedirectResponse:
+        return RedirectResponse(f"{frontend}/platforms?{urlencode(params)}", status_code=302)
+
+    if error:
+        return _redirect({"status": "error", "provider": "soundcloud", "detail": error})
+    if not code or not state:
+        return _redirect({"status": "error", "provider": "soundcloud", "detail": "missing_code"})
+
+    try:
+        user_id, _verifier = soundcloud_verify_state(state)
+    except Exception:
+        return _redirect({"status": "error", "provider": "soundcloud", "detail": "invalid_state"})
+
+    connector = get_connector(PlatformProvider.soundcloud)
+    try:
+        token_data = await connector.complete_authorize(code=code, state=state, redirect_uri="")
+    except Exception:
+        log.exception("SoundCloud OAuth complete_authorize failed")
+        return _redirect(
+            {"status": "error", "provider": "soundcloud", "detail": "exchange_failed"}
+        )
+
+    existing = await db.scalar(
+        select(PlatformConnection).where(
+            PlatformConnection.user_id == user_id,
+            PlatformConnection.provider == PlatformProvider.soundcloud,
+        )
+    )
+    if existing is None:
+        existing = PlatformConnection(
+            user_id=user_id, provider=PlatformProvider.soundcloud
+        )
+        db.add(existing)
+
+    existing.access_token_encrypted = token_data["access_token_encrypted"]
+    existing.refresh_token_encrypted = token_data.get("refresh_token_encrypted")
+    existing.expires_at = token_data.get("expires_at")
+    existing.account_label = token_data.get("account_label")
+    existing.status = PlatformStatus.connected
+    existing.last_error = None
+    existing.connected_at = datetime.now(UTC)
+
+    await db.commit()
+    return _redirect({"status": "connected", "provider": "soundcloud"})
 
 
 async def _persist_beatstars_connection(
