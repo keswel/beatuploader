@@ -25,6 +25,16 @@ def _patch_client(monkeypatch, handler):
     )
 
 
+def test_is_configured_reflects_credentials(monkeypatch):
+    def fake_settings(client_id):
+        return lambda: type("S", (), {"soundcloud_client_id": client_id})()
+
+    monkeypatch.setattr(sc, "get_settings", fake_settings(""))
+    assert sc.SoundCloudConnector().is_configured() is False
+    monkeypatch.setattr(sc, "get_settings", fake_settings("cid"))
+    assert sc.SoundCloudConnector().is_configured() is True
+
+
 def test_pkce_and_state_roundtrip():
     verifier, challenge = sc._gen_pkce()
     assert verifier != challenge and len(challenge) >= 40

@@ -253,9 +253,11 @@ function PlatformCard({
   const status = statusMap[platform.status];
   const Icon = meta.icon;
   const StatusIcon = status.icon;
+  const comingSoon = !platform.configured;
 
   const [connecting, setConnecting] = useState(false);
   const handleConnect = async () => {
+    if (comingSoon) return;
     if (meta.method === "Headless") {
       onCredentialsConnect();
       return;
@@ -288,10 +290,16 @@ function PlatformCard({
           <div className="h-10 w-10 rounded-lg bg-zinc-900 ring-1 ring-zinc-800 flex items-center justify-center shadow-[0_0_20px_-6px_rgba(255,255,255,0.1)]">
             <Icon className="h-5 w-5 text-zinc-200" />
           </div>
-          <Badge variant={status.badge} className="gap-1">
-            <StatusIcon className={cn("h-2.5 w-2.5", status.iconClass)} />
-            {status.label}
-          </Badge>
+          {comingSoon ? (
+            <Badge variant="outline" className="gap-1 text-zinc-400">
+              Coming soon
+            </Badge>
+          ) : (
+            <Badge variant={status.badge} className="gap-1">
+              <StatusIcon className={cn("h-2.5 w-2.5", status.iconClass)} />
+              {status.label}
+            </Badge>
+          )}
         </div>
 
         <div className="text-base font-semibold tracking-tight">{meta.displayName}</div>
@@ -317,7 +325,12 @@ function PlatformCard({
         </div>
 
         <div className="mt-4 flex items-center gap-2">
-          {platform.status === "connected" && (
+          {comingSoon && (
+            <Button size="sm" className="flex-1" disabled>
+              Coming soon
+            </Button>
+          )}
+          {!comingSoon && platform.status === "connected" && (
             <>
               <Button variant="secondary" size="sm" className="flex-1">
                 <Settings2 className="h-3.5 w-3.5" />
@@ -338,12 +351,12 @@ function PlatformCard({
               </Button>
             </>
           )}
-          {platform.status === "disconnected" && (
+          {!comingSoon && platform.status === "disconnected" && (
             <Button size="sm" className="flex-1" onClick={handleConnect} disabled={connecting}>
               {connecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Connect"}
             </Button>
           )}
-          {platform.status === "error" && (
+          {!comingSoon && platform.status === "error" && (
             <Button
               variant="secondary"
               size="sm"

@@ -83,6 +83,16 @@ class PlatformConnector(ABC):
     method: AuthMethod
     display_name: str
 
+    def is_configured(self) -> bool:
+        """Whether this connector has everything it needs to actually connect.
+
+        Default True. OAuth connectors that require app-level credentials (a
+        client_id/secret the operator must provision) override this, so the UI
+        can show the platform as "Coming soon" until those creds are set instead
+        of offering a Connect button that errors.
+        """
+        return True
+
     @abstractmethod
     async def start_authorize(self, *, user_id: int, redirect_uri: str) -> OAuthRedirect:
         """Begin connection flow. For OAuth: return authorize URL + state."""

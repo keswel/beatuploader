@@ -56,9 +56,12 @@ async def list_user_platforms(user: CurrentUser, db: DbSession) -> list[Platform
 
     out: list[PlatformOut] = []
     for connector in list_connectors():
+        configured = connector.is_configured()
         existing = by_provider.get(connector.provider)
         if existing is not None:
-            out.append(PlatformOut.model_validate(existing))
+            po = PlatformOut.model_validate(existing)
+            po.configured = configured
+            out.append(po)
         else:
             out.append(
                 PlatformOut(
@@ -68,6 +71,7 @@ async def list_user_platforms(user: CurrentUser, db: DbSession) -> list[Platform
                     account_label=None,
                     connected_at=None,
                     last_error=None,
+                    configured=configured,
                 )
             )
     return out

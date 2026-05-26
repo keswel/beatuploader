@@ -14,6 +14,10 @@ class PlatformOut(BaseModel):
     account_label: str | None
     connected_at: datetime | None
     last_error: str | None
+    # False when the operator hasn't provisioned this connector's credentials
+    # yet (e.g. SoundCloud before SOUNDCLOUD_CLIENT_ID is set). The UI shows
+    # these as "Coming soon" instead of an erroring Connect button.
+    configured: bool = True
 
 
 class PlatformOAuthStart(BaseModel):

@@ -60,6 +60,9 @@ class YouTubeConnector(PlatformConnector):
     method = AuthMethod.oauth
     display_name = "YouTube"
 
+    def is_configured(self) -> bool:
+        return bool(get_settings().youtube_client_id)
+
     async def start_authorize(self, *, user_id: int, redirect_uri: str) -> OAuthRedirect:
         settings = get_settings()
         if not settings.youtube_client_id:
