@@ -404,9 +404,11 @@ async def _complete_mfa(
             origin=OAUTH_ORIGIN,
         )
     except (BeatStarsApiError, _MfaRequired) as exc:
+        # TEMP DIAGNOSTIC: surface BeatStars' real verifyMfa rejection so we can
+        # see the cause (identifier shape vs challenge linkage). REVERT to the
+        # generic message once the live flow is confirmed.
         raise BeatStarsApiError(
-            "BeatStars rejected the verification code (or it expired). "
-            "Try connecting again for a fresh code."
+            f"[diag] verifyMfa rejected (identifier={username!r}): {exc}"
         ) from exc
 
     verified = data.get("verifyMfa")
@@ -414,9 +416,9 @@ async def _complete_mfa(
     try:
         return await _password_grant(client, username, password, code=grant_code)
     except (BeatStarsApiError, _MfaRequired) as exc:
+        # TEMP DIAGNOSTIC (see above).
         raise BeatStarsApiError(
-            "BeatStars rejected the verification code (or it expired). "
-            "Try connecting again for a fresh code."
+            f"[diag] post-verify grant failed (verifyMfa returned {verified!r}): {exc}"
         ) from exc
 
 
