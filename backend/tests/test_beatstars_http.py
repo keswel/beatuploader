@@ -339,21 +339,28 @@ async def test_login_sms_2fa_flow(monkeypatch):
     from app.services.platforms.beatstars import SmsHandler
 
     detected: list = []
+    verify_vars: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         if "auth/graphql" in url:
-            return httpx.Response(200, json={"data": {"identifierAvailable": {
-                "available": False, "profileDetails": {"username": "keswel"}}}})
+            op = json.loads(request.content).get("operationName")
+            if op == "identifierAvailable":
+                return httpx.Response(200, json={"data": {"identifierAvailable": {
+                    "available": False, "profileDetails": {"username": "keswel"}}}})
+            if op == "verifyMfa":
+                verify_vars.update(json.loads(request.content)["variables"])
+                # verifyMfa hands back a one-time code to finish the grant
+                return httpx.Response(200, json={"data": {"verifyMfa": "OTC-xyz"}})
+            return httpx.Response(200, json={"errors": [{"message": "unexpected op"}]})
         # token endpoint
-        sent_code = b"code=" in request.content
-        if not sent_code:
+        if b"code=" not in request.content:
             # First attempt → MFA required (SMS auto-sent)
             return httpx.Response(400, json={
                 "code": "MFA_VERIFICATION_ACTION",
                 "message": "We sent a code to your phone ending in 1234",
             })
-        # Second attempt carries the code → issue tokens
+        # Grant carrying the one-time code → issue tokens
         return httpx.Response(200, json={
             "access_token": _fake_jwt("MR777"), "refresh_token": "r2"})
 
@@ -362,12 +369,14 @@ async def test_login_sms_2fa_flow(monkeypatch):
 
     sms = SmsHandler(
         on_detected=lambda hint: detected.append(hint),
-        get_code=lambda: "654321",
+        get_code=lambda: "4821",  # 4-digit SMS pin
     )
     session = await bh.login("real@example.com", "pw", sms_handler=sms)
 
-    assert session["member_id"] == "MR777"  # completed via the code
+    assert session["member_id"] == "MR777"  # completed via verifyMfa → grant
     assert detected == ["We sent a code to your phone ending in 1234"]  # hint relayed
+    # The pin went to verifyMfa as {identifier, pin}
+    assert verify_vars["verifyMfaRequest"] == {"identifier": "real@example.com", "pin": "4821"}
 
 
 async def test_login_mfa_without_handler_is_clear_error(monkeypatch):

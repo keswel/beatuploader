@@ -138,6 +138,10 @@ Q_IDENTIFIER = (
     " identifierAvailable(identifier: $identifier) {"
     " available profileDetails { username } } }"
 )
+M_VERIFY_MFA = (
+    "mutation verifyMfa($verifyMfaRequest: VerifyMfaRequestInput!) {"
+    " verifyMfa(verifyMfaRequest: $verifyMfaRequest) }"
+)
 Q_CAN_CREATE = "query canCreateTrack { canCreateTrack }"
 M_ADD_TRACK = "mutation AddTrack { addTrack { id } }"
 M_CREATE_ASSET = (
@@ -384,14 +388,31 @@ async def _complete_mfa(
     # Tell the API layer a code is needed (it returns sms_required to the client),
     # then block — off the event loop — until the code arrives via /beatstars/sms.
     sms_handler.on_detected(hint)
-    code = await asyncio.to_thread(sms_handler.get_code)
-    if not code or not str(code).strip():
+    pin = await asyncio.to_thread(sms_handler.get_code)
+    if not pin or not str(pin).strip():
         raise SmsCancelled("SMS challenge was cancelled or timed out")
+    pin = str(pin).strip()
+
+    # Verifying the pin is a dedicated GraphQL mutation (NOT re-posting the grant
+    # with the pin — that just re-triggers a new SMS). verifyMfa returns either a
+    # one-time code to hand back to the grant, or a boolean (MFA satisfied for the
+    # session via the shared cookie jar). Same client throughout so cookies carry.
     try:
-        # Same client → the MFA-session cookie from the first attempt is reused.
-        return await _password_grant(
-            client, username, password, code=str(code).strip()
+        data = await _graphql(
+            client, None, AUTH_GRAPHQL, "verifyMfa", M_VERIFY_MFA,
+            {"verifyMfaRequest": {"identifier": username, "pin": pin}},
+            origin=OAUTH_ORIGIN,
         )
+    except (BeatStarsApiError, _MfaRequired) as exc:
+        raise BeatStarsApiError(
+            "BeatStars rejected the verification code (or it expired). "
+            "Try connecting again for a fresh code."
+        ) from exc
+
+    verified = data.get("verifyMfa")
+    grant_code = verified if isinstance(verified, str) and verified.strip() else None
+    try:
+        return await _password_grant(client, username, password, code=grant_code)
     except (BeatStarsApiError, _MfaRequired) as exc:
         raise BeatStarsApiError(
             "BeatStars rejected the verification code (or it expired). "
