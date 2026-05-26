@@ -39,7 +39,8 @@ export interface PlatformOut {
   last_error: string | null;
   // False when the operator hasn't provisioned this connector's credentials
   // yet — the UI shows it as "Coming soon" instead of a Connect button.
-  configured: boolean;
+  // Optional: an older/lagging backend may omit it, which we treat as available.
+  configured?: boolean;
 }
 
 export interface UploadOut {

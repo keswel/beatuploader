@@ -253,7 +253,10 @@ function PlatformCard({
   const status = statusMap[platform.status];
   const Icon = meta.icon;
   const StatusIcon = status.icon;
-  const comingSoon = !platform.configured;
+  // Only "coming soon" when the backend EXPLICITLY reports not-configured.
+  // Treat a missing flag (older backend / deploy lag) as available, so we never
+  // hide a working platform like YouTube.
+  const comingSoon = platform.configured === false;
 
   const [connecting, setConnecting] = useState(false);
   const handleConnect = async () => {
