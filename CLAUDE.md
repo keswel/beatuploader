@@ -24,32 +24,32 @@ Deployed and serving real traffic:
 - **Google OAuth**: prod redirect URIs + JS origins added (sign-in + YouTube). App still in Testing mode — non-owner users need adding as test users until Google verification (4-6wk).
 - **Runbook**: `DEPLOY.md`. Deploy infra config: `render.yaml`, `frontend/vercel.json`.
 
-**Verified working in prod**: email/password register + login, email verification, password reset, Google sign-in (+ auto YouTube connect), CORS. **NOT yet verified in prod**: a real YouTube upload (do this), BeatStars (blocked — see below).
+**Verified working in prod**: email/password register + login, email verification, password reset, Google sign-in (+ auto YouTube connect), CORS. **NOT yet verified in prod**: a real YouTube upload (do this), a real BeatStars upload via the new HTTP connector (do this — see below).
 
-### 🚨 BeatStars is BLOCKED on free-tier hosting
+### BeatStars now runs over its private HTTP API (free-tier unblocked)
 
-BeatStars connect/upload **does not work on Render free tier** and likely never will. Render free = **512MB RAM + 0.1 shared CPU**. We hit both failure modes:
+BeatStars connect/upload was **reverse-engineered from the studio.beatstars.com web client** (HAR capture, May 2026) and reimplemented over plain HTTP with `httpx` — **no browser**. This unblocks Render free tier: no Chromium = no 512MB OOM, no CPU starvation. The protocol turned out to be clean — standard OAuth2 + GraphQL + S3 presigned POST, **no captcha on the API, no tus**:
 
-- **Without Chromium memory flags** → instant OOM ("Ran out of memory (used over 512MB)"), container SIGKILLed, no logs flushed, request dies in ~2s.
-- **With memory flags** (`--single-process --disable-dev-shm-usage` etc., commit `b61508e`) → no OOM, but the 0.1 CPU + single-process can't drive BeatStars' heavy Angular SPA; login **hangs** indefinitely (stuck on "Connecting" past 5 min vs ~30s in dev).
+- **Auth**: `POST core.prod.beatstars.net/auth/oauth/token` `grant_type=password` (+ an `identifierAvailable` GraphQL check for a clean "no account" error). Refresh via `grant_type=refresh_token`; re-login with the stored password if refresh fails. The OAuth client id/secret are baked into BeatStars' own frontend (effectively public, not user secrets).
+- **Upload**: `AddTrack` → per-file `createAssetFile` → `GET uppy-v4/s3/params` → multipart `POST` to `bts-content.s3-accelerate.amazonaws.com` → `attachStream`/`attachMainAudio`/`attachStems`/`attachArtwork` → `SaveTrackForm` → `PublishTrackForm`. Licenses are a `contracts[]` of `{itemId, contractId, price, enabled, offerOnly}`; contract ids are **per-account** (fetched live via `GetTrackFormContracts`). Genres resolved against the live enum (`GetMetadataProperties`) — unknown labels are skipped, never guessed (a bad enum would fail the publish).
 
-The vise: enough RAM headroom forces single-process, but single-process + 0.1 CPU is too slow. **No free-tier config threads this needle.** YouTube is unaffected (pure HTTP, no browser).
+Code: `services/platforms/_beatstars_http.py`. `beatstars.py::BeatStarsConnector` dispatches to it when **`BEATSTARS_USE_HTTP=true` (the default)**; set `false` to fall back to the legacy Playwright flow (kept as a safety net). The HTTP path is **transport-only** — the credentials/SMS API endpoints, `connect_with_credentials`'s `(password_enc, session_enc, label)` contract, and the job pipeline are all unchanged (the persisted "session" is just `{access_token, refresh_token, expires_at, member_id, account_label}` JSON instead of Playwright storage_state).
 
-**Paths forward (not yet decided — pick one in the new session):**
-1. **Ship YouTube-only now**, mark BeatStars "Coming soon", get test users. Recommended — don't let the hardest integration block launch. (Lowest cost/effort.)
-2. **Move backend to a ≥1GB-RAM host** (Fly/Railway ~$5-10/mo, or Render Standard 2GB $25/mo — note Render **Starter is also 512MB**, won't help) — runs existing Playwright code unchanged. For real scale, browsers belong on an autoscaling worker pool behind a job queue, NOT on the API box (see "real worker queue" TODO).
-3. **Reverse-engineer BeatStars' private HTTP API** (replace Playwright with httpx) — tiny runtime footprint, scales to thousands concurrent, but multi-day reverse-engineering with real dead-end risk (anti-bot TLS fingerprinting, undocumented Uppy/tus upload protocol). Do a DevTools-network research spike before committing.
+**Verified**: 8 unit tests (`tests/test_beatstars_http.py`) exercise the full flow against an httpx `MockTransport` — they prove the orchestration matches the captured contract. **NOT yet verified against the live API.** Smoke-test before trusting in prod. Assumptions to watch if a live publish 400s:
+1. `freeDownloadSettings: {enabled: false}` — we send the minimal shape; the captures only ever showed it enabled with a full `terms` block. If rejected, send the full object (`_FREE_DOWNLOAD_OFF` in `_beatstars_http.py`).
+2. MP3-only uploads attach the one MP3 asset to **both** `attachStream` and `attachMainAudio` (the capture had a separate WAV master).
+3. `contracts[]` is treated as the explicit enabled-set; we never send Basic (the captures never did — Basic is the account default).
 
-### ⚠️ Two debug commits on `main` need REVERTING before BeatStars is "done"
+SMS 2FA only ever applied to the Playwright path; the password grant didn't trigger it, so the SMS challenge plumbing is dormant on the HTTP path.
 
-Left in to diagnose the OOM remotely (Render free swallows tracebacks):
-- `2cf2742` — **leaks raw exception + traceback in the HTTP 500 response** of `/platforms/beatstars/credentials`. Security smell; revert to the generic `"Couldn't connect to BeatStars"` message (the stdout-print diagnostics from `0c58371` can stay or go).
-- `b61508e` — Chromium `--single-process` memory flags. Keep the genuinely-useful ones (`--disable-dev-shm-usage`, `--disable-gpu`); reconsider `--single-process`/`--no-zygote` if moving to a host where stability matters more than RAM.
+### Debug commits reverted
+
+The two temporary OOM-diagnosis commits are reverted (commit `513d4e7`): `/platforms/beatstars/credentials` no longer leaks exception internals in its 500 (back to the generic message), and the Chromium `--single-process`/`--no-zygote` flags are gone (kept the harmless `--disable-dev-shm-usage`/`--disable-gpu`). Moot for the default HTTP path anyway — it launches no browser. `*.har` network captures are gitignored (they carry live tokens/passwords).
 
 ## What works today
 
 - **YouTube** — OAuth connect + auto-upload of the master/tagged audio as an unlisted video. Token auto-refresh persists the new access token back to the DB (`7825e32`). End-to-end working **in dev**; prod-verify a real upload.
-- **BeatStars** — headless login (Playwright), interactive SMS 2FA when challenged, end-to-end upload incl. cover art + license picking + price + publish. Session reused across uploads. **Works in dev; BLOCKED in prod on free-tier hosting — see "Production" above.**
+- **BeatStars** — **HTTP/GraphQL connector** (`_beatstars_http.py`, the default) — password-grant login, full upload (assets→S3→attach→save→publish), license/price selection, genre-enum resolution. Runs on free-tier hosting (no browser). **Unit-tested against the captured contract; pending a live end-to-end test.** Legacy Playwright path (headless login + SMS 2FA + DOM-driven upload, cover art + license picking) kept behind `BEATSTARS_USE_HTTP=false`. See "Production → BeatStars now runs over its private HTTP API" above.
 - **SoundCloud** — registry stub, raises `NotImplementedError`. Intentionally deferred.
 - **Spotify / Audiomack / Bandcamp** — enum entries only, no connector files yet.
 
@@ -177,7 +177,9 @@ Distinct from sign-in. For YouTube:
 
 Redirect URI is computed from `BACKEND_BASE_URL` in `.env` — must match exactly what's registered in Google Console.
 
-### BeatStars (headless, deep-dive)
+### BeatStars (headless Playwright — now the FALLBACK)
+
+> **This is the legacy path, used only when `BEATSTARS_USE_HTTP=false`.** The default is now the HTTP connector (`_beatstars_http.py`) — see "Production → BeatStars now runs over its private HTTP API". This section documents the Playwright fallback, kept as a safety net if the HTTP API drifts.
 
 The hardest integration and the product's differentiator. Lives in `services/platforms/beatstars.py`. **All selectors are verified against the live UI (May 2026).**
 

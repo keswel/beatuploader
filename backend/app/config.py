@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     soundcloud_client_id: str = ""
     soundcloud_client_secret: str = ""
 
+    # BeatStars transport. True (default) drives BeatStars over its private HTTP
+    # API (httpx) — no browser, tiny footprint, works on free-tier hosting.
+    # Set False to fall back to the legacy Playwright headless flow (needs
+    # Chromium + ~1GB RAM; kept as a safety net if the HTTP API drifts).
+    beatstars_use_http: bool = True
+
     storage_dir: str = Field(default="./storage")
 
     # Run `alembic upgrade head` on app boot. Safe for single-worker setups

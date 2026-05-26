@@ -1103,8 +1103,19 @@ class BeatStarsConnector(PlatformConnector):
         *,
         file_path: Path,
         meta: BeatMetadata,
-        progress_cb: ProgressCallback | None = None,  # noqa: ARG002 — Uppy progress not wired yet
+        progress_cb: ProgressCallback | None = None,
     ) -> UploadHandle:
+        # Default path: drive BeatStars over its private HTTP API (no browser).
+        # Falls back to the Playwright flow below when BEATSTARS_USE_HTTP=false.
+        from app.config import get_settings
+
+        if get_settings().beatstars_use_http:
+            from app.services.platforms import _beatstars_http
+
+            return await _beatstars_http.upload(
+                connection, file_path=file_path, meta=meta, progress_cb=progress_cb
+            )
+
         storage: dict[str, Any] | None = None
         if connection.session_data_encrypted:
             try:
@@ -1163,7 +1174,18 @@ async def connect_with_credentials(
 
     If ``sms_handler`` is provided and BeatStars challenges us with 2FA, the
     handler bridges the code between the API endpoint and this login thread.
+    (SMS only applies to the Playwright path; the HTTP password grant doesn't
+    trigger it, so ``sms_handler`` is ignored there.)
     """
+    from app.config import get_settings
+
+    if get_settings().beatstars_use_http:
+        from app.services.platforms import _beatstars_http
+
+        return await _beatstars_http.connect_with_credentials(
+            username=username, password=password
+        )
+
     connector = BeatStarsConnector()
     result = await connector.login_and_capture_session(
         username=username, password=password, sms_handler=sms_handler
