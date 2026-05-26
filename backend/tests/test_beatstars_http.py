@@ -20,6 +20,11 @@ from app.security import encrypt_token
 from app.services.platforms import _beatstars_http as bh
 from app.services.platforms.base import BeatMetadata
 
+
+async def _noop_sleep(*_args, **_kwargs):
+    """Stand-in for asyncio.sleep so retry-backoff doesn't slow tests."""
+    return None
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Pure helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -291,6 +296,41 @@ async def test_login_password_grant(monkeypatch):
     assert session["refresh_token"] == "refresh-xyz"
     assert session["account_label"] == "keswel"
     assert "token" in calls
+
+
+async def test_login_survives_identifier_gateway_timeout(monkeypatch):
+    """A GATEWAY_TIMEOUT on the optional identifierAvailable check must NOT block
+    login — we fall through to the password grant."""
+    monkeypatch.setattr(bh.asyncio, "sleep", _noop_sleep)  # skip retry backoff
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "auth/graphql" in str(request.url):
+            return httpx.Response(200, json={"errors": [{"message": "GATEWAY_TIMEOUT"}]})
+        if "/auth/oauth/token" in str(request.url):
+            return httpx.Response(200, json={
+                "access_token": _fake_jwt("MR42"), "refresh_token": "r"})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(bh, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+
+    session = await bh.login("real@example.com", "correct-pw")
+    assert session["member_id"] == "MR42"  # login succeeded despite the timeout
+
+
+async def test_password_grant_5xx_is_not_bad_credentials(monkeypatch):
+    """A 5xx from the token endpoint must not be reported as 'wrong password'."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "auth/graphql" in str(request.url):
+            return httpx.Response(200, json={"data": {"identifierAvailable": {
+                "available": False, "profileDetails": {"username": "x"}}}})
+        return httpx.Response(503, text="upstream timeout")
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(bh, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+
+    with pytest.raises(bh.BeatStarsApiError, match="temporarily unavailable"):
+        await bh.login("real@example.com", "correct-pw")
 
 
 async def test_login_no_account(monkeypatch):

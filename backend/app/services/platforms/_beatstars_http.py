@@ -21,6 +21,7 @@ error surfaces as a clean `BeatStarsApiError` naming the operation.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -80,10 +81,27 @@ _FREE_DOWNLOAD_OFF = {"enabled": False}
 
 _HTTP_TIMEOUT = httpx.Timeout(600.0, connect=30.0)
 
+# Look like the real web client. A bare httpx UA can trip BeatStars' edge/WAF
+# (we saw GATEWAY_TIMEOUTs from the GraphQL gateway), and these headers match
+# what studio.beatstars.com actually sends.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0) "
+        "Gecko/20100101 Firefox/151.0"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# BeatStars' GraphQL gateway is flaky — these messages/statuses are worth a retry
+# on idempotent reads (never on mutations, which could duplicate).
+_TRANSIENT_GQL_ERRORS = {"GATEWAY_TIMEOUT", "SERVICE_UNAVAILABLE", "INTERNAL_SERVER_ERROR"}
+_TRANSIENT_STATUSES = {502, 503, 504}
+
 
 def _new_client() -> httpx.AsyncClient:
     """Factory for the HTTP client. A seam so tests can inject a MockTransport."""
-    return httpx.AsyncClient(timeout=_HTTP_TIMEOUT)
+    return httpx.AsyncClient(timeout=_HTTP_TIMEOUT, headers=_BROWSER_HEADERS)
 
 
 class BeatStarsApiError(RuntimeError):
@@ -210,35 +228,49 @@ def _session_from_tokens(tokens: dict, *, account_label: str | None = None) -> d
 async def _password_grant(
     client: httpx.AsyncClient, username: str, password: str
 ) -> dict:
-    resp = await client.post(
-        TOKEN_URL,
-        data={
-            "grant_type": "password",
-            "username": username,
-            "password": password,
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "origin": "https://www.beatstars.com/",
-        },
-        headers={"Origin": OAUTH_ORIGIN},
-    )
-    if resp.status_code != 200:
-        # 400/401 here is overwhelmingly bad credentials.
+    try:
+        resp = await client.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "password",
+                "username": username,
+                "password": password,
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "origin": "https://www.beatstars.com/",
+            },
+            headers={"Origin": OAUTH_ORIGIN},
+        )
+    except httpx.HTTPError as exc:
+        raise BeatStarsApiError(
+            "Couldn't reach BeatStars to sign in — try again in a moment."
+        ) from exc
+    if resp.status_code == 200:
+        return resp.json()
+    if resp.status_code in (400, 401):
+        # OAuth returns 400 invalid_grant for genuinely bad credentials.
         raise BeatStarsApiError("Wrong BeatStars email or password")
-    return resp.json()
+    # 5xx / gateway timeout — NOT a credential problem; don't mislabel it.
+    raise BeatStarsApiError(
+        f"BeatStars sign-in is temporarily unavailable (HTTP {resp.status_code}) — "
+        "try again shortly."
+    )
 
 
 async def _refresh_grant(client: httpx.AsyncClient, refresh_token: str) -> dict:
-    resp = await client.post(
-        TOKEN_URL,
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-        },
-        headers={"Origin": STUDIO_ORIGIN},
-    )
+    try:
+        resp = await client.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+            },
+            headers={"Origin": STUDIO_ORIGIN},
+        )
+    except httpx.HTTPError as exc:
+        raise BeatStarsApiError("Couldn't reach BeatStars to refresh the session") from exc
     if resp.status_code != 200:
         raise BeatStarsApiError("BeatStars session expired")
     return resp.json()
@@ -248,28 +280,24 @@ async def login(username: str, password: str) -> dict:
     """Authenticate and return a fresh session dict. Raises BeatStarsApiError."""
     async with _new_client() as client:
         label: str | None = None
-        # Best-effort account existence check — gives a clean "no account" error
-        # instead of a generic "wrong password". Never fatal on its own.
+        # Best-effort account-existence check — gives a clean "no account" error
+        # instead of a generic "wrong password". It's a nicety, so a transport or
+        # gateway error here must NOT block login (we saw GATEWAY_TIMEOUTs). Only
+        # a definitive "this email isn't registered" result is allowed to fail.
+        info: dict | None = None
         try:
             data = await _graphql(
-                client,
-                None,
-                AUTH_GRAPHQL,
-                "identifierAvailable",
-                Q_IDENTIFIER,
-                {"identifier": username},
-                origin=OAUTH_ORIGIN,
+                client, None, AUTH_GRAPHQL, "identifierAvailable", Q_IDENTIFIER,
+                {"identifier": username}, origin=OAUTH_ORIGIN, idempotent=True,
             )
             info = data.get("identifierAvailable") or {}
+        except Exception as exc:  # noqa: BLE001 — the check is optional
+            log.info("identifierAvailable check skipped: %s", exc)
+        if info is not None:
             # available == True means the identifier is FREE → no such account.
             if info.get("available") is True:
                 raise BeatStarsApiError("No BeatStars account found for that email")
-            details = info.get("profileDetails") or {}
-            label = details.get("username")
-        except BeatStarsApiError:
-            raise
-        except Exception as exc:  # noqa: BLE001 — the check is optional
-            log.info("identifierAvailable check skipped: %s", exc)
+            label = (info.get("profileDetails") or {}).get("username")
 
         tokens = await _password_grant(client, username, password)
         session = _session_from_tokens(tokens, account_label=label or username)
@@ -322,22 +350,50 @@ async def _graphql(
     variables: dict,
     *,
     origin: str = STUDIO_ORIGIN,
+    idempotent: bool = False,
 ) -> dict:
+    """POST a GraphQL operation. Set ``idempotent=True`` only for reads — it
+    enables a short retry on BeatStars' flaky gateway (5xx / GATEWAY_TIMEOUT).
+    Mutations stay single-shot so a timed-out-but-applied write can't duplicate.
+    """
     headers = {"Origin": origin}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    resp = await client.post(
-        f"{endpoint}?op={op}",
-        json={"operationName": op, "variables": variables, "query": query},
-        headers=headers,
-    )
-    if resp.status_code != 200:
-        raise BeatStarsApiError(f"BeatStars {op} request failed (HTTP {resp.status_code})")
-    body = resp.json()
-    if body.get("errors"):
-        msg = (body["errors"][0] or {}).get("message", "unknown error")
-        raise BeatStarsApiError(f"BeatStars {op} failed: {msg}")
-    return body.get("data") or {}
+    payload = {"operationName": op, "variables": variables, "query": query}
+
+    attempts = 3 if idempotent else 1
+    transient: BeatStarsApiError | None = None
+    for attempt in range(attempts):
+        try:
+            resp = await client.post(f"{endpoint}?op={op}", json=payload, headers=headers)
+        except httpx.HTTPError as exc:
+            transient = BeatStarsApiError(f"Couldn't reach BeatStars for {op}")
+            if not idempotent:
+                raise transient from exc
+        else:
+            if resp.status_code in _TRANSIENT_STATUSES:
+                transient = BeatStarsApiError(
+                    f"BeatStars {op} is temporarily unavailable (HTTP {resp.status_code})"
+                )
+            elif resp.status_code != 200:
+                raise BeatStarsApiError(
+                    f"BeatStars {op} request failed (HTTP {resp.status_code})"
+                )
+            else:
+                body = resp.json()
+                errors = body.get("errors")
+                if not errors:
+                    return body.get("data") or {}
+                msg = (errors[0] or {}).get("message", "unknown error")
+                err = BeatStarsApiError(f"BeatStars {op} failed: {msg}")
+                if idempotent and msg in _TRANSIENT_GQL_ERRORS:
+                    transient = err
+                else:
+                    raise err
+        # Reached only on a transient failure with retries remaining.
+        if attempt < attempts - 1:
+            await asyncio.sleep(0.6 * (attempt + 1))
+    raise transient or BeatStarsApiError(f"BeatStars {op} failed")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -574,7 +630,8 @@ async def upload(
         # Plan gate — surfaces "you've hit your upload limit" clearly.
         try:
             gate = await _graphql(
-                client, token, STUDIO_GRAPHQL, "canCreateTrack", Q_CAN_CREATE, {}
+                client, token, STUDIO_GRAPHQL, "canCreateTrack", Q_CAN_CREATE, {},
+                idempotent=True,
             )
             if gate.get("canCreateTrack") is False:
                 raise BeatStarsApiError(
@@ -666,7 +723,8 @@ async def upload(
         if meta.genre:
             try:
                 md = await _graphql(
-                    client, token, STUDIO_GRAPHQL, "GetMetadataProperties", Q_METADATA, {}
+                    client, token, STUDIO_GRAPHQL, "GetMetadataProperties", Q_METADATA, {},
+                    idempotent=True,
                 )
                 menu = (md.get("metadataProperties") or {}).get("genres") or []
                 enum = _match_genre(menu, meta.genre)
@@ -683,7 +741,7 @@ async def upload(
         try:
             cdata = await _graphql(
                 client, token, STUDIO_GRAPHQL, "GetTrackFormContracts", Q_CONTRACTS,
-                {"itemId": track_id, "page": 0, "size": 50},
+                {"itemId": track_id, "page": 0, "size": 50}, idempotent=True,
             )
             menu = (cdata.get("publishedContracts") or {}).get("content") or []
             contracts = _build_contracts(track_id, meta, menu)
