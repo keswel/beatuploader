@@ -35,12 +35,20 @@ BeatStars connect/upload was **reverse-engineered from the studio.beatstars.com 
 
 Code: `services/platforms/_beatstars_http.py`. `beatstars.py::BeatStarsConnector` dispatches to it when **`BEATSTARS_USE_HTTP=true` (the default)**; set `false` to fall back to the legacy Playwright flow (kept as a safety net). The HTTP path is **transport-only** — the credentials/SMS API endpoints, `connect_with_credentials`'s `(password_enc, session_enc, label)` contract, and the job pipeline are all unchanged (the persisted "session" is just `{access_token, refresh_token, expires_at, member_id, account_label}` JSON instead of Playwright storage_state).
 
-**Verified**: 8 unit tests (`tests/test_beatstars_http.py`) exercise the full flow against an httpx `MockTransport` — they prove the orchestration matches the captured contract. **NOT yet verified against the live API.** Smoke-test before trusting in prod. Assumptions to watch if a live publish 400s:
+**Verified**: 12 unit tests (`tests/test_beatstars_http.py`) exercise the full upload + login (incl. 2FA) against an httpx `MockTransport`. **Login confirmed live** (creds accepted, 2FA fires); a full live connect + upload is still pending the SMS-cap reset (below). Assumptions to watch if a live publish 400s:
 1. `freeDownloadSettings: {enabled: false}` — we send the minimal shape; the captures only ever showed it enabled with a full `terms` block. If rejected, send the full object (`_FREE_DOWNLOAD_OFF` in `_beatstars_http.py`).
 2. MP3-only uploads attach the one MP3 asset to **both** `attachStream` and `attachMainAudio` (the capture had a separate WAV master).
 3. `contracts[]` is treated as the explicit enabled-set; we never send Basic (the captures never did — Basic is the account default).
 
-SMS 2FA only ever applied to the Playwright path; the password grant didn't trigger it, so the SMS challenge plumbing is dormant on the HTTP path.
+**SMS 2FA — required from server IPs, and implemented** (`_beatstars_http._complete_mfa`). Logins from Render's datacenter IP reliably trigger BeatStars SMS 2FA (new-device detection); home/browser logins don't, so no HAR captured it — the flow was recovered from the login JS bundle. Mechanics:
+- Plain password grant **auto-sends the SMS** and returns error code `MFA_VERIFICATION_ACTION`.
+- Verify is a GraphQL mutation on `/auth/graphql`: `verifyMfa({verifyMfaRequest:{identifier, pin}})` — `pin` is the SMS code; `identifier` is the **resolved BeatStars username** (`profileDetails.username` from `identifierAvailable`, **NOT** the email used for the grant). It returns a one-time code; re-run the password grant with it as `code` to get tokens. Same httpx client throughout so the MFA cookie carries.
+- Relayed through the existing `SmsHandler` + `/platforms/beatstars/sms` endpoint + frontend dialog (unchanged): `on_detected` → endpoint returns `sms_required`; the login coroutine blocks on `asyncio.to_thread(get_code)` until the code arrives.
+- **Daily SMS cap**: BeatStars limits verification SMS per account/day; exhausting it returns 401 `"Maximum number of messages sent today was reached"` (detected + surfaced as a clear "try tomorrow", NOT a creds error). Connect attempts are a scarce daily resource — iterate sparingly. Normal use is unaffected: once connected, uploads reuse the refresh_token (no re-login, no SMS).
+
+### ⚠️ Temporary `[diag]` debug code in `_beatstars_http.py` — REVERT after one clean connect
+
+To debug the live 2FA flow under a scarce daily SMS budget, `_beatstars_http.py` currently surfaces raw error detail to the client in two spots (both marked `# TEMP DIAGNOSTIC`): the `verifyMfa` rejection (`[diag] verifyMfa rejected (identifier=...)`) and any non-MFA 400/401 grant body (`[diag] grant HTTP ...`). These leak response bodies — **revert to the generic messages once a real connect succeeds.**
 
 ### Debug commits reverted
 
@@ -49,7 +57,7 @@ The two temporary OOM-diagnosis commits are reverted (commit `513d4e7`): `/platf
 ## What works today
 
 - **YouTube** — OAuth connect + auto-upload of the master/tagged audio as an unlisted video. Token auto-refresh persists the new access token back to the DB (`7825e32`). End-to-end working **in dev**; prod-verify a real upload.
-- **BeatStars** — **HTTP/GraphQL connector** (`_beatstars_http.py`, the default) — password-grant login, full upload (assets→S3→attach→save→publish), license/price selection, genre-enum resolution. Runs on free-tier hosting (no browser). **Unit-tested against the captured contract; pending a live end-to-end test.** Legacy Playwright path (headless login + SMS 2FA + DOM-driven upload, cover art + license picking) kept behind `BEATSTARS_USE_HTTP=false`. See "Production → BeatStars now runs over its private HTTP API" above.
+- **BeatStars** — **HTTP/GraphQL connector** (`_beatstars_http.py`, the default) — password-grant login **+ SMS 2FA** (via `verifyMfa`), full upload (assets→S3→attach→save→publish), license/price selection, genre-enum resolution. Runs on free-tier hosting (no browser). **Unit-tested + login confirmed live; full connect+upload pending the SMS-cap reset.** Legacy Playwright path (headless login + SMS 2FA + DOM-driven upload, cover art + license picking) kept behind `BEATSTARS_USE_HTTP=false`. See "Production → BeatStars now runs over its private HTTP API" above.
 - **SoundCloud** — **OAuth2 connector built** (`soundcloud.py`): authorization-code + PKCE via `secure.soundcloud.com`, multipart upload to `api.soundcloud.com/tracks`, token refresh. Wired (registry + `/soundcloud/callback`). **Blocked on credentials, NOT code** — registering an app needs an active **Artist Pro** account; once `SOUNDCLOUD_CLIENT_ID`/`SECRET` are set it's connectable. Our use case is explicitly permitted by SoundCloud's API terms ("sale of an app with an Upload integration" + "promote content via authenticated access to the user's account"). Unit-tested against a mock transport; **not yet verified against the live API** (auth-header scheme `OAuth` vs `Bearer`, `/tracks` field names — iterate once creds exist).
 - **Spotify / Audiomack / Bandcamp** — enum entries only, no connector files yet.
 
@@ -106,6 +114,8 @@ PlatformConnector
 - `api_key` — preset token (unused)
 
 **Registry** is in `registry.py`. Currently wired: `youtube`, `beatstars`, `soundcloud` (the last needs `SOUNDCLOUD_CLIENT_ID`/`SECRET` to actually connect). Other providers in `PlatformProvider` enum (spotify, audiomack, bandcamp) aren't even stubbed yet — adding any of them just requires a file and registry entry.
+
+**`PlatformConnector.is_configured()`** (default `True`) reports whether a connector has the operator-provisioned credentials it needs. OAuth connectors override it (`bool(get_settings().<provider>_client_id)`); headless BeatStars stays `True`. The `/platforms` list surfaces it as `PlatformOut.configured`, and the frontend shows un-configured platforms as **"Coming soon"** (disabled) rather than a Connect button that errors — so SoundCloud sits dormant cleanly until its creds are set. Frontend treats a *missing* `configured` as available (only an explicit `false` = coming soon), so a backend deploy lag never hides a working platform.
 
 ### Upload pipeline (`backend/app/api/uploads.py` + `services/jobs.py`)
 
