@@ -84,9 +84,17 @@ The `noreply@` mailbox must be on the verified Resend domain — they reject mis
 
 1. Push this repo to GitHub if you haven't.
 2. Render → **New** → **Blueprint** → connect your GitHub account → pick the repo. Render reads [`render.yaml`](./render.yaml) and shows what it'll create:
-   - `beatuploader-db` (Postgres)
    - `beatuploader-api` (Docker web service + 10 GB disk)
+
+   No database — Postgres is on **Neon**, not Render (Render's free Postgres is
+   deleted after 90 days). The repo is linked to Neon project
+   `misty-voice-04631137`, branch `production`; `.neon` at the repo root records
+   that link and `neon link` refreshes `.env.local` with the connection strings.
 3. Render prompts for the secrets marked `sync: false` in `render.yaml`. Paste:
+   - `DATABASE_URL` — the Neon connection string:
+     `neon connection-string production --project-id misty-voice-04631137`
+     Use the **direct** host (no `-pooler`); see the comment in `render.yaml`.
+     The schema is created on first boot by `init_db()` (`RUN_MIGRATIONS_ON_BOOT=true`).
    - `TOKEN_ENCRYPTION_KEY` — from step 1
    - `BACKEND_BASE_URL` — `https://api.<yourdomain>` (use the temporary `.onrender.com` URL for the first boot, swap to the custom domain after step 6)
    - `FRONTEND_BASE_URL` — `https://<yourdomain>`

@@ -34,3 +34,5 @@ storage/
 
 # Local scratch / smoke scripts (not part of the test suite)
 backend/_smoke.py
+.neon
+node_modules/
