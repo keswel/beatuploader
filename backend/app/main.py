@@ -9,8 +9,12 @@ from contextlib import asynccontextmanager
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+import hmac
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.router import api_router
@@ -95,6 +99,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     HSTS is only sent when DEBUG=False because dev runs over http://localhost
     and an HSTS pin from a self-signed/loopback origin can wedge browser state.
+    Desktop (local) mode is plain-http loopback too, so it never sends HSTS.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -114,7 +119,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Permissions-Policy",
             "geolocation=(), microphone=(), camera=(), usb=(), payment=()",
         )
-        if not settings.debug:
+        if not settings.debug and not settings.local_mode:
             # 1-year HSTS, includeSubDomains. Prod only — see class docstring.
             response.headers.setdefault(
                 "Strict-Transport-Security",
@@ -123,7 +128,38 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class LocalSessionMiddleware(BaseHTTPMiddleware):
+    """Desktop-mode gate: only the app's own window may call the local API.
+
+    1. Host must be our loopback origin — defeats DNS rebinding, where a
+       hostile site re-points its own hostname at 127.0.0.1 to become
+       "same-origin" with us.
+    2. /api/* must carry the per-launch session token, which only reaches the
+       app's own page (injected into index.html, unreadable cross-origin).
+
+    OAuth callbacks are exempt from (2): the system browser lands on them
+    without the token, and their signed `state` JWT is the credential.
+    """
+
+    _CALLBACKS = ("/api/platforms/youtube/callback", "/api/platforms/soundcloud/callback")
+
+    async def dispatch(self, request: Request, call_next):
+        port = settings.local_port
+        if request.headers.get("host") not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+            return PlainTextResponse("Forbidden host", status_code=403)
+        path = request.url.path
+        if path.startswith("/api/") and path not in self._CALLBACKS:
+            supplied = request.headers.get("x-beatuploader-session", "")
+            if not hmac.compare_digest(supplied, settings.local_session_token):
+                return PlainTextResponse("Unauthorized", status_code=401)
+        return await call_next(request)
+
+
 app.add_middleware(SecurityHeadersMiddleware)
+if settings.local_mode:
+    if not settings.local_session_token:
+        raise RuntimeError("LOCAL_MODE requires LOCAL_SESSION_TOKEN (set by the desktop shell)")
+    app.add_middleware(LocalSessionMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -165,3 +201,24 @@ async def health_ready() -> dict:
         from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="database unreachable")
     return {"status": "ok"}
+
+
+if settings.local_mode and settings.frontend_dist_dir:
+    _dist = Path(settings.frontend_dist_dir).resolve()
+    _index_html = (_dist / "index.html").read_text(encoding="utf-8").replace(
+        "</head>",
+        f'<meta name="beatuploader-session" content="{settings.local_session_token}"></head>',
+        1,
+    )
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def desktop_frontend(path: str):
+        """Serve the built SPA. Real files as-is; every other path gets
+        index.html (client-side routing) with the session token injected."""
+        if path.startswith("api/"):
+            return PlainTextResponse("Not found", status_code=404)
+        if path:
+            candidate = (_dist / path).resolve()
+            if candidate.is_file() and candidate.is_relative_to(_dist):
+                return FileResponse(candidate)
+        return HTMLResponse(_index_html, headers={"Cache-Control": "no-store"})

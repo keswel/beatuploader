@@ -1,11 +1,13 @@
 import asyncio
+import html
 import logging
 import queue
+import webbrowser
 from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 
 log = logging.getLogger(__name__)
@@ -45,6 +47,38 @@ from app.services.rate_limit import (
 _SMS_WAIT_TIMEOUT_S = 300
 
 router = APIRouter(prefix="/platforms", tags=["platforms"])
+
+_LOCAL_RETURN_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Beatuploader</title>
+<style>
+  body {{ margin: 0; height: 100vh; display: grid; place-items: center;
+         background: #09090b; color: #fafafa; font: 15px/1.5 system-ui, sans-serif; }}
+  p {{ color: #a1a1aa; margin: 4px 0 0; }}
+</style></head>
+<body><div><strong>{title}</strong><p>{body}</p></div></body></html>"""
+
+
+def _oauth_return(params: dict[str, str]) -> Response:
+    """Where an OAuth callback lands the user.
+
+    Hosted: redirect back to the dashboard's /platforms page with a status.
+    Desktop: the flow ran in the user's system browser (Google blocks OAuth in
+    embedded webviews), so show a "you can close this tab" page — the app's
+    own window polls /platforms and picks up the new connection.
+    """
+    settings = get_settings()
+    if not settings.local_mode:
+        frontend = settings.frontend_base_url.rstrip("/")
+        return RedirectResponse(f"{frontend}/platforms?{urlencode(params)}", status_code=302)
+
+    provider = html.escape(params.get("provider", "platform")).capitalize()
+    if params.get("status") == "connected":
+        title = f"{provider} connected"
+        body = "You can close this tab and return to Beatuploader."
+    else:
+        title = f"Couldn't connect {provider}"
+        body = f"Close this tab and try again in Beatuploader. ({html.escape(params.get('detail', 'error'))})"
+    return HTMLResponse(_LOCAL_RETURN_PAGE.format(title=title, body=body))
 
 
 @router.get("", response_model=list[PlatformOut])
@@ -96,6 +130,15 @@ async def start_connect(provider: PlatformProvider, user: CurrentUser) -> dict:
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail=str(exc),
         ) from exc
+    if get_settings().local_mode:
+        # Desktop: hand the consent screen to the system browser. The callback
+        # hits this same local server, so the app just polls for the result.
+        webbrowser.open(redirect.authorize_url)
+        return {
+            "authorize_url": redirect.authorize_url,
+            "state": redirect.state,
+            "external": True,
+        }
     return {"authorize_url": redirect.authorize_url, "state": redirect.state}
 
 
@@ -105,12 +148,8 @@ async def youtube_callback(
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
-) -> RedirectResponse:
-    settings = get_settings()
-    frontend = settings.frontend_base_url.rstrip("/")
-
-    def _redirect(params: dict[str, str]) -> RedirectResponse:
-        return RedirectResponse(f"{frontend}/platforms?{urlencode(params)}", status_code=302)
+) -> Response:
+    _redirect = _oauth_return
 
     if error:
         return _redirect({"status": "error", "provider": "youtube", "detail": error})
@@ -163,12 +202,8 @@ async def soundcloud_callback(
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
-) -> RedirectResponse:
-    settings = get_settings()
-    frontend = settings.frontend_base_url.rstrip("/")
-
-    def _redirect(params: dict[str, str]) -> RedirectResponse:
-        return RedirectResponse(f"{frontend}/platforms?{urlencode(params)}", status_code=302)
+) -> Response:
+    _redirect = _oauth_return
 
     if error:
         return _redirect({"status": "error", "provider": "soundcloud", "detail": error})

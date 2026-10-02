@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { IS_DESKTOP } from "@/lib/target";
 
 /**
  * Hamburger trigger + slide-in sheet of the same nav items the desktop
@@ -139,14 +140,16 @@ export function MobileNav() {
                     <Settings className="h-4 w-4 text-zinc-500" />
                     Settings
                   </NavLink>
-                  <button
-                    type="button"
-                    onClick={logout}
-                    className="w-full flex items-center gap-3 rounded-md px-2.5 py-2.5 text-sm font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/50 transition-colors"
-                  >
-                    <LogOut className="h-4 w-4 text-zinc-500" />
-                    Sign out
-                  </button>
+                  {!IS_DESKTOP && (
+                    <button
+                      type="button"
+                      onClick={logout}
+                      className="w-full flex items-center gap-3 rounded-md px-2.5 py-2.5 text-sm font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/50 transition-colors"
+                    >
+                      <LogOut className="h-4 w-4 text-zinc-500" />
+                      Sign out
+                    </button>
+                  )}
 
                   <div className="mt-3 rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-3">
                     <div className="flex items-center gap-2.5">

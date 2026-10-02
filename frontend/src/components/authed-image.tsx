@@ -1,7 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { getToken } from "@/lib/api";
-
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000/api";
+import { API_BASE, authHeaders } from "@/lib/api";
 
 // Cache blob URLs per source path so we don't re-fetch the same image when a row
 // re-renders or when multiple rows reference the same artwork.
@@ -10,11 +8,8 @@ const cache = new Map<string, Promise<string>>();
 function fetchBlobUrl(path: string): Promise<string> {
   const existing = cache.get(path);
   if (existing) return existing;
-  const token = getToken();
   const url = `${API_BASE}${path}`;
-  const p = fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
+  const p = fetch(url, { headers: authHeaders() })
     .then((r) => {
       if (!r.ok) throw new Error(`fetch ${path}: ${r.status}`);
       return r.blob();

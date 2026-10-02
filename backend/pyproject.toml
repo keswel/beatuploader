@@ -29,9 +29,15 @@ dependencies = [
     # Sentry is optional at runtime — _init_sentry skips cleanly when DSN is
     # unset — but bundling the SDK keeps prod images self-contained.
     "sentry-sdk[fastapi]>=2.18.0",
+    # Desktop mode keeps the token-encryption key in the OS credential vault.
+    "keyring>=25.0.0",
 ]
 
 [project.optional-dependencies]
+# Builds the desktop sidecar exe: `pyinstaller desktop.spec` (see desktop/README.md).
+desktop = [
+    "pyinstaller>=6.10.0",
+]
 dev = [
     "ruff>=0.8.0",
     "pytest>=8.3.0",

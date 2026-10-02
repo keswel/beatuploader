@@ -1,0 +1,74 @@
+# Builds the Windows installer + auto-update manifest and publishes a GitHub
+# Release. Trigger: push a tag matching desktop/src-tauri/tauri.conf.json's
+# "version" (e.g. version 0.2.0 → `git tag v0.2.0 && git push origin v0.2.0`).
+#
+# Installed apps poll releases/latest/download/latest.json (tauri.conf.json →
+# plugins.updater.endpoints), so publishing a release IS shipping the update.
+#
+# Required repo secrets:
+#   TAURI_SIGNING_PRIVATE_KEY            contents of ~/.tauri/beatuploader-updater.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   its password (empty string if none)
+#   YOUTUBE_DESKTOP_CLIENT_ID            Google OAuth client of type "Desktop app"
+#   YOUTUBE_DESKTOP_CLIENT_SECRET
+name: Desktop release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Build desktop frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build:desktop
+
+      - name: Build backend sidecar
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install -e ".[desktop]"
+          .venv\Scripts\pyinstaller desktop.spec --noconfirm
+
+      - name: Install Tauri CLI
+        working-directory: desktop
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Baked into the shell at compile time (option_env! in main.rs).
+          BEATUPLOADER_YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_DESKTOP_CLIENT_ID }}
+          BEATUPLOADER_YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_DESKTOP_CLIENT_SECRET }}
+        with:
+          projectPath: desktop
+          args: --config src-tauri/tauri.release.conf.json
+          tagName: v__VERSION__
+          releaseName: Beatuploader v__VERSION__
+          releaseBody: Download `Beatuploader_*_x64-setup.exe` below to install. Existing installs update themselves.
+          releaseDraft: false
+          includeUpdaterJson: true

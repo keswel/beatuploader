@@ -4,26 +4,54 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_db
 from app.models.user import User
 from app.security import decode_access_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# auto_error=False so desktop (local) mode, which has no tokens, isn't 401'd by
+# the scheme itself; hosted mode raises below when the token is missing.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
+LOCAL_USER_EMAIL = "local@beatuploader.app"
+
+
+async def get_local_user(db: AsyncSession) -> User:
+    """The single implicit user of the desktop app, created on first use.
+
+    Desktop mode has no accounts — the session-token middleware in main.py is
+    what gates access — but every table is keyed by user_id, so one row stands
+    in for "whoever owns this machine".
+    """
+    user = await db.scalar(select(User).order_by(User.id).limit(1))
+    if user is None:
+        user = User(email=LOCAL_USER_EMAIL, handle="producer")
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    return user
+
+
 async def get_current_user(
     db: DbSession,
-    token: Annotated[str, Depends(oauth2_scheme)],
+    token: Annotated[str | None, Depends(oauth2_scheme)],
 ) -> User:
+    if get_settings().local_mode:
+        return await get_local_user(db)
+
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if token is None:
+        raise credentials_exc
     try:
         payload = decode_access_token(token)
         user_id = payload.get("sub")

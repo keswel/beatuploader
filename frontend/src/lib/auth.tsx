@@ -10,6 +10,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, getToken, setToken, setUnauthorizedHandler } from "./api";
+import { IS_DESKTOP } from "./target";
 import type { User } from "./types";
 
 interface AuthContextValue {
@@ -33,6 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
 
   const logout = useCallback(() => {
+    // Desktop has no accounts — nothing to sign out of.
+    if (IS_DESKTOP) return;
     setToken(null);
     setUser(null);
     qc.clear();
@@ -44,10 +47,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, [logout]);
 
-  // Hydrate user from token on mount
+  // Hydrate user from token on mount (desktop: the local user, no token)
   useEffect(() => {
     const token = getToken();
-    if (!token) {
+    if (!token && !IS_DESKTOP) {
       setIsLoading(false);
       return;
     }
@@ -80,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!getToken()) return;
+    if (!getToken() && !IS_DESKTOP) return;
     const u = await api.auth.me();
     setUser(u);
   }, []);

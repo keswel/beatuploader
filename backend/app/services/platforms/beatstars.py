@@ -28,7 +28,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
+except ImportError:  # desktop build ships without Playwright — HTTP transport only
+    Page = Any  # type: ignore[misc,assignment]
+
+    class PlaywrightTimeoutError(Exception):  # type: ignore[no-redef]
+        pass
 
 from app.models.platform import PlatformConnection, PlatformProvider
 from app.security import decrypt_token, encrypt_token

@@ -14,7 +14,10 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, TypeVar
 
-from playwright.sync_api import Browser, BrowserContext, sync_playwright
+try:
+    from playwright.sync_api import Browser, BrowserContext, sync_playwright
+except ImportError:  # desktop build ships without Playwright (BEATSTARS_USE_HTTP only)
+    sync_playwright = None  # type: ignore[assignment]
 
 # Cap concurrent browsers. Each Chromium uses ~300MB RAM.
 _browser_semaphore = threading.Semaphore(3)
@@ -40,6 +43,8 @@ def browser_session(
     Restore a saved session by passing storage_state (cookies + localStorage).
     Capture the current state after the operation with context.storage_state().
     """
+    if sync_playwright is None:
+        raise RuntimeError("Playwright isn't installed — set BEATSTARS_USE_HTTP=true")
     with _browser_semaphore, sync_playwright() as p:
         browser = p.chromium.launch(
             headless=headless,

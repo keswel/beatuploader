@@ -28,7 +28,10 @@ from app import models  # noqa: F401
 
 config = context.config
 
-if config.config_file_name is not None:
+# Only configure logging for the CLI. When the app runs migrations in-process
+# (db.init_db passes a connection), fileConfig would disable the app's own
+# loggers (disable_existing_loggers=True) and clobber its handlers.
+if config.config_file_name is not None and "connection" not in config.attributes:
     fileConfig(config.config_file_name)
 
 # Resolve the DB URL from app settings at runtime, overriding whatever (empty)

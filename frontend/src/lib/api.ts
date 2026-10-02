@@ -8,11 +8,29 @@ import type {
   UploadOut,
   User,
 } from "./types";
+import { IS_DESKTOP } from "./target";
 
-// Dev fallback matches start-backend.ps1 (port 8001). In prod, VITE_API_BASE
-// MUST be set at build time on Vercel — otherwise the bundle hits localhost.
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8001/api";
+// Desktop: the local backend serves this bundle, so the API is same-origin.
+// Hosted dev fallback matches start-backend.ps1 (port 8001). In hosted prod,
+// VITE_API_BASE MUST be set at build time — otherwise the bundle hits localhost.
+export const API_BASE = IS_DESKTOP
+  ? "/api"
+  : (import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8001/api");
 const TOKEN_KEY = "beatuploader.token";
+
+// Desktop: per-launch secret the local backend injects into index.html. Every
+// API call echoes it — that's what stops other sites from driving the local API.
+const DESKTOP_SESSION =
+  document
+    .querySelector<HTMLMetaElement>('meta[name="beatuploader-session"]')
+    ?.content ?? "";
+
+/** Credentials header for a backend call (Bearer JWT hosted, session token desktop). */
+export function authHeaders(): Record<string, string> {
+  if (IS_DESKTOP) return { "X-Beatuploader-Session": DESKTOP_SESSION };
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -50,9 +68,8 @@ async function request<T>(
   if (!finalHeaders.has("Content-Type") && init.body && !isFormData) {
     finalHeaders.set("Content-Type", "application/json");
   }
-  if (auth) {
-    const token = getToken();
-    if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
+  if (auth || IS_DESKTOP) {
+    for (const [k, v] of Object.entries(authHeaders())) finalHeaders.set(k, v);
   }
 
   const res = await fetch(`${API_BASE}${path}`, { ...rest, headers: finalHeaders });
@@ -144,7 +161,9 @@ export const api = {
   platforms: {
     list: () => request<PlatformOut[]>("/platforms"),
     connect: (provider: PlatformProvider) =>
-      request<{ authorize_url: string; state: string }>(
+      // `external`: desktop — the backend opened the consent page in the
+      // system browser; poll /platforms instead of navigating.
+      request<{ authorize_url: string; state: string; external?: boolean }>(
         `/platforms/${provider}/connect`,
         { method: "POST" },
       ),

@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { VerifyEmailBanner } from "./verify-email-banner";
+import { IS_DESKTOP } from "@/lib/target";
 
 export function Layout() {
   const location = useLocation();
@@ -14,7 +15,7 @@ export function Layout() {
         <Topbar />
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8">
-            <VerifyEmailBanner />
+            {!IS_DESKTOP && <VerifyEmailBanner />}
             <AnimatePresence mode="wait">
               <motion.div
                 key={location.pathname}

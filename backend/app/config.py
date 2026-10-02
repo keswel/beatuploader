@@ -1,4 +1,7 @@
+import os
+import secrets
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -80,6 +83,23 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     sentry_environment: str = "development"
 
+    # ── Desktop (local) mode ────────────────────────────────────────────────
+    # The desktop app (Tauri shell + this backend as a sidecar, see
+    # app/desktop.py) runs single-user on 127.0.0.1. LOCAL_MODE=true turns off
+    # accounts/JWT login, keeps all data under DATA_DIR, keeps the token
+    # encryption key in the OS credential vault, and serves the built frontend.
+    local_mode: bool = False
+    # Defaults to %APPDATA%\Beatuploader (or ~/.beatuploader) in local mode.
+    data_dir: str = ""
+    # Port the desktop backend listens on. Set by the shell at launch.
+    local_port: int = 0
+    # Per-launch secret the shell generates; every /api call must echo it in
+    # X-Beatuploader-Session. Stops other websites in the user's browser from
+    # driving the local API (CSRF / DNS rebinding).
+    local_session_token: str = ""
+    # Built desktop frontend (vite build --mode desktop). Served at / in local mode.
+    frontend_dist_dir: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
@@ -88,8 +108,42 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
+    if s.local_mode:
+        _apply_local_mode(s)
     _validate_secrets(s)
     return s
+
+
+def default_data_dir() -> Path:
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "Beatuploader"
+    return Path.home() / ".beatuploader"
+
+
+def _apply_local_mode(s: Settings) -> None:
+    """Derive every path/secret for the single-user desktop app.
+
+    Nothing here comes from a server: the DB + files live in the user's data
+    dir, the Fernet key lives in the OS credential vault, and the JWT secret
+    (only used to sign OAuth state now) is random per process.
+    """
+    from app.local_secrets import get_or_create_encryption_key
+
+    data_dir = Path(s.data_dir) if s.data_dir else default_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    s.data_dir = str(data_dir)
+    s.database_url = f"sqlite+aiosqlite:///{(data_dir / 'beatuploader.db').as_posix()}"
+    s.storage_dir = str(data_dir / "storage")
+    s.jwt_secret = secrets.token_urlsafe(48)
+    s.token_encryption_key = get_or_create_encryption_key(data_dir)
+    s.run_migrations_on_boot = True
+
+    base = f"http://127.0.0.1:{s.local_port}"
+    s.backend_base_url = base
+    s.frontend_base_url = base
+    # Frontend is served from the same origin — no cross-origin callers allowed.
+    s.cors_origins = ""
 
 
 def _validate_secrets(s: Settings) -> None:

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { IS_DESKTOP } from "@/lib/target";
 
 const navItems = [
   { to: "/dashboard", label: "Overview", icon: LayoutDashboard, end: true },
@@ -101,14 +102,16 @@ export function Sidebar() {
           <Settings className="h-4 w-4 text-zinc-500" />
           Settings
         </NavLink>
-        <button
-          type="button"
-          onClick={logout}
-          className="w-full flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/50 transition-colors duration-200"
-        >
-          <LogOut className="h-4 w-4 text-zinc-500" />
-          Sign out
-        </button>
+        {!IS_DESKTOP && (
+          <button
+            type="button"
+            onClick={logout}
+            className="w-full flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/50 transition-colors duration-200"
+          >
+            <LogOut className="h-4 w-4 text-zinc-500" />
+            Sign out
+          </button>
+        )}
 
         <motion.div
           initial={{ opacity: 0, y: 8 }}

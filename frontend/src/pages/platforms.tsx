@@ -258,7 +258,40 @@ function PlatformCard({
   // hide a working platform like YouTube.
   const comingSoon = platform.configured === false;
 
+  const qc = useQueryClient();
   const [connecting, setConnecting] = useState(false);
+  // Desktop: consent happens in the system browser, so poll until the local
+  // backend's callback records the connection (or give up after 5 min).
+  // Holds connected_at at click time, so a Reauthorize waits for a NEW stamp.
+  const [awaitingBrowser, setAwaitingBrowser] = useState<false | { since: string | null }>(
+    false,
+  );
+  useEffect(() => {
+    if (!awaitingBrowser) return;
+    const poll = setInterval(
+      () => qc.invalidateQueries({ queryKey: ["platforms"] }),
+      2000,
+    );
+    const giveUp = setTimeout(() => {
+      setAwaitingBrowser(false);
+      setConnecting(false);
+    }, 5 * 60_000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(giveUp);
+    };
+  }, [awaitingBrowser, qc]);
+  useEffect(() => {
+    if (
+      awaitingBrowser &&
+      platform.status === "connected" &&
+      platform.connected_at !== awaitingBrowser.since
+    ) {
+      setAwaitingBrowser(false);
+      setConnecting(false);
+    }
+  }, [awaitingBrowser, platform.status, platform.connected_at]);
+
   const handleConnect = async () => {
     if (comingSoon) return;
     if (meta.method === "Headless") {
@@ -267,8 +300,11 @@ function PlatformCard({
     }
     setConnecting(true);
     try {
-      const { authorize_url } = await api.platforms.connect(platform.provider);
-      window.location.href = authorize_url;
+      const { authorize_url, external } = await api.platforms.connect(
+        platform.provider,
+      );
+      if (external) setAwaitingBrowser({ since: platform.connected_at });
+      else window.location.href = authorize_url;
     } catch (err) {
       setConnecting(false);
       alert(

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Splash page only. The app UI is served by the local backend (http://127.0.0.1) and deliberately gets NO Tauri IPC access.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

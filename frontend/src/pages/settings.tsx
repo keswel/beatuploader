@@ -30,6 +30,7 @@ import {
   isPasswordValid,
 } from "@/lib/password";
 import { formatDate } from "@/lib/utils";
+import { IS_DESKTOP } from "@/lib/target";
 
 export function SettingsPage() {
   const { user, logout } = useAuth();
@@ -44,7 +45,11 @@ export function SettingsPage() {
     <>
       <PageHeader
         title="Settings"
-        description="Account, security, and integrations."
+        description={
+          IS_DESKTOP
+            ? "Upload defaults and integrations."
+            : "Account, security, and integrations."
+        }
       />
 
       {!user ? (
@@ -53,23 +58,26 @@ export function SettingsPage() {
         </div>
       ) : (
         <div className="space-y-4 max-w-2xl">
-          <AccountSection
-            handle={user.handle}
-            email={user.email}
-            plan={user.plan}
-            createdAt={user.created_at}
-            onSaved={() => qc.invalidateQueries({ queryKey: ["auth", "me"] })}
-          />
+          {/* Desktop has no account: no email/plan, password, or deletion. */}
+          {!IS_DESKTOP && (
+            <AccountSection
+              handle={user.handle}
+              email={user.email}
+              plan={user.plan}
+              createdAt={user.created_at}
+              onSaved={() => qc.invalidateQueries({ queryKey: ["auth", "me"] })}
+            />
+          )}
           <YouTubeSection
             template={user.youtube_description_template ?? ""}
             onSaved={() => qc.invalidateQueries({ queryKey: ["auth", "me"] })}
           />
-          <SecuritySection />
+          {!IS_DESKTOP && <SecuritySection />}
           <IntegrationsSection
             connectedCount={connectedCount}
             totalCount={platforms.length}
           />
-          <DangerZone handle={user.handle} onDeleted={logout} />
+          {!IS_DESKTOP && <DangerZone handle={user.handle} onDeleted={logout} />}
         </div>
       )}
     </>
