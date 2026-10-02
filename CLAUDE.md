@@ -1,18 +1,46 @@
 # Beatuploader
 
-Multi-platform beat upload SaaS. Producers connect their accounts (BeatStars, YouTube, etc.) and push beats to every platform from one dashboard. Target users: independent producers selling beats.
+Beat upload tool for independent producers: connect BeatStars + YouTube once, push each beat to every platform in one go. **Free, donation-supported.**
+
+**As of 2026-10-02 the product is a Windows desktop app** — everything runs on the producer's machine and *nothing* (credentials, files, accounts) is stored on our servers. The website is marketing + installer download only. The hosted multi-user SaaS code is kept in the repo (still deployed on Render) but is **no longer reachable from the website**. Long-term: a background/tray app that notices a finished FL Studio export, prompts for metadata, and uploads.
 
 ## Layout
 
 ```
 beatuploader/
-├── frontend/   Vite + React 19 + TS + Tailwind v4 + motion + TanStack Query
-└── backend/    FastAPI + async SQLAlchemy 2.0 + Pydantic v2 + Playwright (sync)
+├── desktop/    Tauri v2 shell (Rust): window, tray, sidecar lifecycle, auto-updater → see desktop/README.md
+├── frontend/   Vite + React 19 + TS + Tailwind v4 + motion + TanStack Query — TWO builds:
+│                 `npm run build`          → website (landing/privacy/terms + Download)
+│                 `npm run build:desktop`  → dist-desktop/, the app UI (dashboard, no auth)
+└── backend/    FastAPI + async SQLAlchemy 2.0 + Pydantic v2 — TWO modes:
+                  hosted (default)         → multi-user, JWT, Postgres (legacy, on Render)
+                  LOCAL_MODE=true          → desktop sidecar (app/desktop.py, PyInstaller desktop.spec)
 ```
 
-Frontend talks to backend via `/api/*` over JSON (multipart for uploads). Auth is JWT Bearer in `Authorization` header, token in `localStorage`.
+## Desktop app (the product)
 
-## Production (LIVE as of 2026-05-25)
+`beatuploader.exe` (Tauri) picks a free loopback port + a per-launch session secret, spawns `backend/beatuploader-backend.exe` (PyInstaller onedir build of `app/desktop.py`) with them, shows a bundled splash until `/health` answers, then navigates its window to `http://127.0.0.1:<port>/dashboard` — the backend serves `frontend/dist-desktop` itself. Closing the window hides to tray; tray → Quit exits. Installer: NSIS, per-user (no admin), ~26 MiB. Full build/release/runbook: **`desktop/README.md`**.
+
+**Local mode (`LOCAL_MODE=true`, set by `app/desktop.py`)** — `config._apply_local_mode`:
+- Data in `%APPDATA%\Beatuploader\` (`beatuploader.db` SQLite, `storage/`, `logs/backend.log`). Alembic migrates on boot.
+- Fernet key for platform tokens lives in **Windows Credential Manager** (`keyring`, service `Beatuploader`, `app/local_secrets.py`); file fallback only if the vault is unavailable. JWT secret is random per process (only signs OAuth state now).
+- **No accounts**: `deps.get_current_user` returns a single implicit local user (auto-created). Only `GET/PATCH /api/auth/me` are mounted (`api/router.py`); register/login/password/Google sign-in routes don't exist.
+- **Gate** (`main.LocalSessionMiddleware`): Host must be `127.0.0.1:<port>`/`localhost:<port>` (anti DNS-rebinding) and every `/api/*` needs `X-Beatuploader-Session` (except the OAuth callbacks, which are protected by their signed `state`). The token is injected into `index.html` as `<meta name="beatuploader-session">`; `frontend/src/lib/api.ts::authHeaders()` sends it.
+- **OAuth** (YouTube): Google blocks OAuth in embedded webviews, so `POST /platforms/{p}/connect` calls `webbrowser.open()` and returns `external: true`; the callback renders a "you can close this tab" page; the Platforms page polls until `connected_at` changes. Needs a Google client of type **Desktop app** (loopback redirect, any port) — baked into the shell at compile time via `BEATUPLOADER_YOUTUBE_CLIENT_ID/SECRET` (`option_env!`).
+- BeatStars uses the HTTP connector only; **Playwright is excluded from the bundle** (imports in `beatstars.py`/`_browser.py` are optional). From a home IP BeatStars rarely triggers SMS 2FA.
+- The sidecar exits when its stdin closes (shell died) — never orphaned, never holding file locks that would break the updater.
+
+**Frontend build target**: `lib/target.ts::IS_DESKTOP` (`import.meta.env.MODE === "desktop"`). Desktop hides sign-out, verify-email banner, account/security/danger-zone settings. Website build routes only `/`, `/privacy`, `/terms`; login/reset/verify pages still exist in `src/pages` but are unrouted.
+
+**Auto-update**: `tauri-plugin-updater` checks `https://github.com/keswel/beatuploader/releases/latest/download/latest.json` on launch (+ tray "Check for updates"). Releases are built by `.github/workflows/desktop-release.yml` on a `v*` tag. Signing private key: `~/.tauri/beatuploader-updater.key` (no password) → repo secret `TAURI_SIGNING_PRIVATE_KEY`. **Losing it strands every install on its current version.** Repo must stay public (anonymous release downloads).
+
+**Desktop TODO**: Windows code signing (unsigned installer → SmartScreen warning); privacy policy/terms still describe the hosted service — rewrite for local-only; donations link on the website; Google OAuth verification still needed for non-test users (unchanged); macOS build (Tauri + PyInstaller both support it; the shell's dev path assumes `.venv/Scripts`); FL Studio export-folder watcher in the tray process.
+
+## Hosted backend (legacy — kept, not user-facing)
+
+The section below documents the hosted deployment. It still runs but the website no longer links to it. Don't build new features against hosted-only paths (accounts, email, Google sign-in) unless that changes.
+
+### Production (LIVE as of 2026-05-25)
 
 Deployed and serving real traffic:
 
@@ -35,9 +63,13 @@ BeatStars connect/upload was **reverse-engineered from the studio.beatstars.com 
 
 Code: `services/platforms/_beatstars_http.py`. `beatstars.py::BeatStarsConnector` dispatches to it when **`BEATSTARS_USE_HTTP=true` (the default)**; set `false` to fall back to the legacy Playwright flow (kept as a safety net). The HTTP path is **transport-only** — the credentials/SMS API endpoints, `connect_with_credentials`'s `(password_enc, session_enc, label)` contract, and the job pipeline are all unchanged (the persisted "session" is just `{access_token, refresh_token, expires_at, member_id, account_label}` JSON instead of Playwright storage_state).
 
-**Verified**: 12 unit tests (`tests/test_beatstars_http.py`) exercise the full upload + login (incl. 2FA) against an httpx `MockTransport`. **Login confirmed live** (creds accepted, 2FA fires); a full live connect + upload is still pending the SMS-cap reset (below). Assumptions to watch if a live publish 400s:
-1. `freeDownloadSettings: {enabled: false}` — we send the minimal shape; the captures only ever showed it enabled with a full `terms` block. If rejected, send the full object (`_FREE_DOWNLOAD_OFF` in `_beatstars_http.py`).
-2. MP3-only uploads attach the one MP3 asset to **both** `attachStream` and `attachMainAudio` (the capture had a separate WAV master).
+**Verified live (2026-10-02, desktop app)**: connect from a home IP (no SMS 2FA) and a full MP3-only publish. Unit tests in `tests/test_beatstars_http.py` run against an httpx `MockTransport` that models async asset processing. Things the first live run taught us — don't regress them:
+1. **Wait for asset processing before attaching.** BeatStars processes each S3 upload asynchronously (~6s for a 6MB MP3). Attaching earlier records a 0-byte asset → bundle `ERROR` ("audio file size 0") → `PublishTrackForm` fails with the generic "There are errors in your request." `_wait_until_processed` polls the asset listings (newest-first) until `size > 0`, all files in parallel, 300s cap.
+2. **Genre is required to publish.** `_resolve_genres` runs before any upload: the user's pick if it matches the enum, else the account's saved defaults (`fetchTrackPreference`), else a clear error.
+3. **`releaseDate` uses BeatStars' server clock** (HTTP `Date` header → `_clock_skew`). A PC clock running fast made tracks come back `SCHEDULED` hours in the future.
+4. Debugging: `PublishTrackForm` errors carry no field detail — query the draft with the web client's `GetTrack` and read `bundle.{progress,error,errorPart}`. Full GraphQL error payloads are logged at WARNING.
+
+Confirmed fine: the minimal `freeDownloadSettings: {enabled: false}`, and attaching one MP3 asset as **both** stream and main audio.
 3. `contracts[]` is treated as the explicit enabled-set; we never send Basic (the captures never did — Basic is the account default).
 
 **SMS 2FA — required from server IPs, and implemented** (`_beatstars_http._complete_mfa`). Logins from Render's datacenter IP reliably trigger BeatStars SMS 2FA (new-device detection); home/browser logins don't, so no HAR captured it — the flow was recovered from the login JS bundle. Mechanics:
@@ -57,7 +89,7 @@ The two temporary OOM-diagnosis commits are reverted (commit `513d4e7`): `/platf
 ## What works today
 
 - **YouTube** — OAuth connect + auto-upload of the master/tagged audio as an unlisted video. Token auto-refresh persists the new access token back to the DB (`7825e32`). End-to-end working **in dev**; prod-verify a real upload.
-- **BeatStars** — **HTTP/GraphQL connector** (`_beatstars_http.py`, the default) — password-grant login **+ SMS 2FA** (via `verifyMfa`), full upload (assets→S3→attach→save→publish), license/price selection, genre-enum resolution. Runs on free-tier hosting (no browser). **Unit-tested + login confirmed live; full connect+upload pending the SMS-cap reset.** Legacy Playwright path (headless login + SMS 2FA + DOM-driven upload, cover art + license picking) kept behind `BEATSTARS_USE_HTTP=false`. See "Production → BeatStars now runs over its private HTTP API" above.
+- **BeatStars** — **HTTP/GraphQL connector** (`_beatstars_http.py`, the default) — password-grant login **+ SMS 2FA** (via `verifyMfa`), full upload (assets→S3→attach→save→publish), license/price selection, genre-enum resolution. Runs on free-tier hosting (no browser). **Full connect + publish verified live from the desktop app (2026-10-02).** Legacy Playwright path (headless login + SMS 2FA + DOM-driven upload, cover art + license picking) kept behind `BEATSTARS_USE_HTTP=false`. See "Production → BeatStars now runs over its private HTTP API" above.
 - **SoundCloud** — **OAuth2 connector built** (`soundcloud.py`): authorization-code + PKCE via `secure.soundcloud.com`, multipart upload to `api.soundcloud.com/tracks`, token refresh. Wired (registry + `/soundcloud/callback`). **Blocked on credentials, NOT code** — registering an app needs an active **Artist Pro** account; once `SOUNDCLOUD_CLIENT_ID`/`SECRET` are set it's connectable. Our use case is explicitly permitted by SoundCloud's API terms ("sale of an app with an Upload integration" + "promote content via authenticated access to the user's account"). Unit-tested against a mock transport; **not yet verified against the live API** (auth-header scheme `OAuth` vs `Bearer`, `/tracks` field names — iterate once creds exist).
 - **Spotify / Audiomack / Bandcamp** — enum entries only, no connector files yet.
 

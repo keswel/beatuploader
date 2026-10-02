@@ -190,6 +190,12 @@ async def _process(job_id: int, user_id: int, payload: UploadCreate) -> None:
             # write when a chunk advances by >= 5%.
             loop = asyncio.get_running_loop()
             last_pct = {"value": 0}
+            # One AsyncSession can't run two commits at once. Async connectors
+            # (BeatStars HTTP) report progress from the loop itself, so updates
+            # can overlap — serialize them, and drain them before the job's own
+            # commits below.
+            commit_lock = asyncio.Lock()
+            pending: list = []
 
             def _on_progress(pct: int, p=provider_str) -> None:
                 async def _update() -> None:
@@ -203,23 +209,29 @@ async def _process(job_id: int, user_id: int, payload: UploadCreate) -> None:
                     snapshot[p] = current
                     job.targets = snapshot
                     job.progress = pct
-                    try:
-                        await db.commit()
-                    except Exception:
-                        log.exception("progress commit failed for job %s", job_id)
+                    async with commit_lock:
+                        try:
+                            await db.commit()
+                        except Exception:
+                            log.exception("progress commit failed for job %s", job_id)
 
                 # Throttle: only schedule a commit when the percentage actually
                 # moves at least 5 points. Avoids 100s of commits on a fast link.
                 if pct - last_pct["value"] >= 5 or pct >= 99:
-                    asyncio.run_coroutine_threadsafe(_update(), loop)
+                    pending.append(asyncio.run_coroutine_threadsafe(_update(), loop))
 
             try:
-                handle = await connector.upload(
-                    connection,
-                    file_path=primary_path,
-                    meta=meta,
-                    progress_cb=_on_progress,
-                )
+                try:
+                    handle = await connector.upload(
+                        connection,
+                        file_path=primary_path,
+                        meta=meta,
+                        progress_cb=_on_progress,
+                    )
+                finally:
+                    await asyncio.gather(
+                        *(asyncio.wrap_future(f) for f in pending), return_exceptions=True
+                    )
                 targets[provider_str] = {
                     "status": "done",
                     "progress": 100,

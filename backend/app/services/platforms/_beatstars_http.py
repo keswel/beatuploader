@@ -8,8 +8,8 @@ Flow mirrors the web client exactly:
 
   Auth   : identifierAvailable (nice "no account" error) → oauth/token
            grant_type=password → {access_token, refresh_token}. Refresh via
-           grant_type=refresh_token; re-login with the stored password if that
-           fails.
+           grant_type=refresh_token; if that fails the user reconnects — we
+           never store the password.
   Upload : AddTrack → (per file) createAssetFile → GET uppy s3/params →
            POST file to S3 presigned form → attach{Stream,MainAudio,Stems}File
            / attachArtwork → SaveTrackForm → PublishTrackForm.
@@ -27,7 +27,8 @@ import binascii
 import json
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import httpx
@@ -164,10 +165,34 @@ M_ATTACH_ARTWORK = (
     "mutation trackFormAttachArtwork($itemId: String!, $assetId: String!) {"
     " attachArtwork(itemId: $itemId, assetId: $assetId) }"
 )
+# Asset listings (newest first), used to wait for upload processing. Field
+# selections mirror the web client's track form queries.
+Q_AUDIO_ASSETS = (
+    "query GetTrackFormAlreadyUploadedAudioAssets { member { assets {"
+    " audioAssets(page: 0, size: 100) { content { file { assetId size } } } } } }"
+)
+Q_IMAGE_ASSETS = (
+    "query GetTrackFormAlreadyUploadedImages { member { assets {"
+    " imageAssets(page: 0, size: 100) { content { file { assetId size } } } } } }"
+)
+Q_BINARY_ASSETS = (
+    "query GetTrackFormAlreadyUploadedBinaryAssets { member { assets {"
+    " binaryAssets(page: 0, size: 100) { content { file { assetId size } } } } } }"
+)
+_ASSET_LISTINGS = {
+    "AUDIO": ("GetTrackFormAlreadyUploadedAudioAssets", Q_AUDIO_ASSETS, "audioAssets"),
+    "IMAGE": ("GetTrackFormAlreadyUploadedImages", Q_IMAGE_ASSETS, "imageAssets"),
+    "BINARY": ("GetTrackFormAlreadyUploadedBinaryAssets", Q_BINARY_ASSETS, "binaryAssets"),
+}
 Q_CONTRACTS = (
     "query GetTrackFormContracts($itemId: String!, $page: Int, $size: Int) {"
     " publishedContracts(itemId: $itemId, page: $page, size: $size) {"
     " content { id title deliverables defaultPrice price enabled category } totalElements } }"
+)
+# The account's saved upload defaults. `metadata.genres` is what the web form
+# pre-fills — BeatStars refuses to publish a track with no genre.
+Q_TRACK_PREFERENCE = (
+    "query fetchTrackPreference { trackPreference { metadata { genres { key value } } } }"
 )
 Q_METADATA = (
     "query GetMetadataProperties {"
@@ -513,11 +538,16 @@ async def _graphql(
                     f"BeatStars {op} request failed (HTTP {resp.status_code})"
                 )
             else:
+                _note_server_time(resp)
                 body = resp.json()
                 errors = body.get("errors")
                 if not errors:
                     return body.get("data") or {}
                 msg = (errors[0] or {}).get("message", "unknown error")
+                # The top-level message is often generic ("There are errors in
+                # your request."); the field-level reasons live in the rest of
+                # the payload (extensions etc.). Log it all server-side.
+                log.warning("BeatStars %s errors: %s", op, json.dumps(errors)[:4000])
                 err = BeatStarsApiError(f"BeatStars {op} failed: {msg}")
                 if idempotent and msg in _TRANSIENT_GQL_ERRORS:
                     transient = err
@@ -590,14 +620,62 @@ async def _upload_asset(
     return asset_id
 
 
+# BeatStars processes an uploaded file asynchronously (S3 temp → asset store,
+# ~6s for a 6MB MP3). Attaching before that finishes records the asset with
+# size 0 and the track bundle errors ("The audio file size 0 exceeds the
+# maximum allowed." → PublishTrackForm "There are errors in your request.").
+_ASSET_POLL_INTERVAL_S = 1.5
+_ASSET_PROCESS_TIMEOUT_S = 300.0  # big WAV masters / stem zips take a while
+
+
+async def _wait_until_processed(
+    client: httpx.AsyncClient, token: str, asset_id: str, path: Path
+) -> None:
+    """Block until BeatStars lists ``asset_id`` with a non-zero size."""
+    op, query, key = _ASSET_LISTINGS[_bts_type(path)]
+    deadline = asyncio.get_running_loop().time() + _ASSET_PROCESS_TIMEOUT_S
+    while True:
+        data = await _graphql(client, token, STUDIO_GRAPHQL, op, query, {}, idempotent=True)
+        content = ((data.get("member") or {}).get("assets") or {}).get(key) or {}
+        for item in content.get("content") or []:
+            f = item.get("file") or {}
+            if f.get("assetId") == asset_id and f.get("size"):
+                return
+        if asyncio.get_running_loop().time() >= deadline:
+            raise BeatStarsApiError(
+                f"BeatStars is still processing {path.name} — try the upload again in a minute"
+            )
+        await asyncio.sleep(_ASSET_POLL_INTERVAL_S)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Track form builders
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# BeatStars server time minus ours, from the HTTP Date header. releaseDate must
+# be in server time: a user whose PC clock runs fast would otherwise schedule
+# every release hours into the future (track comes back SCHEDULED, not live).
+_clock_skew = timedelta(0)
+
+
+def _note_server_time(resp: httpx.Response) -> None:
+    global _clock_skew
+    raw = resp.headers.get("date")
+    if not raw:
+        return
+    try:
+        _clock_skew = parsedate_to_datetime(raw) - datetime.now(UTC)
+    except (TypeError, ValueError):
+        pass
+
+
 def _now_iso_millis() -> str:
     # BeatStars sends e.g. "2026-05-25T20:57:17.979Z" (millisecond precision).
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    # Back off 2s: the Date header has 1s resolution, and a release date even
+    # slightly in the future makes the track SCHEDULED instead of live.
+    now = datetime.now(UTC) + _clock_skew - timedelta(seconds=2)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _match_genre(genres_menu: list[dict], user_label: str) -> str | None:
@@ -618,6 +696,41 @@ def _match_genre(genres_menu: list[dict], user_label: str) -> str | None:
         if pair.get("key") == key_guess:
             return pair.get("key")
     return None
+
+
+async def _resolve_genres(
+    client: httpx.AsyncClient, token: str, meta: BeatMetadata
+) -> list[str]:
+    """Genre enum keys for the track. BeatStars rejects a publish with none.
+
+    The user's pick if it matches BeatStars' enum; otherwise the account's
+    saved default genres (what the web form pre-fills — the "keeps last
+    time's genre" behaviour producers expect).
+    """
+    if meta.genre:
+        md = await _graphql(
+            client, token, STUDIO_GRAPHQL, "GetMetadataProperties", Q_METADATA, {},
+            idempotent=True,
+        )
+        menu = (md.get("metadataProperties") or {}).get("genres") or []
+        enum = _match_genre(menu, meta.genre)
+        if enum:
+            return [enum]
+        log.info("Genre %r didn't match a BeatStars enum; using account defaults", meta.genre)
+
+    prefs = await _graphql(
+        client, token, STUDIO_GRAPHQL, "fetchTrackPreference", Q_TRACK_PREFERENCE, {},
+        idempotent=True,
+    )
+    saved = ((prefs.get("trackPreference") or {}).get("metadata") or {}).get("genres") or []
+    genres = [g["key"] for g in saved if g.get("key")][:3]
+    if not genres:
+        raise BeatStarsApiError(
+            "BeatStars requires a genre — pick one on the upload form."
+            if not meta.genre
+            else f"BeatStars doesn't recognise the genre {meta.genre!r} — pick one from the list."
+        )
+    return genres
 
 
 def _build_track(meta: BeatMetadata, genres: list[str]) -> dict:
@@ -776,6 +889,10 @@ async def upload(
         except Exception as exc:  # noqa: BLE001
             log.info("canCreateTrack check skipped: %s", exc)
 
+        # Genre first: BeatStars won't publish without one, so fail before
+        # uploading anything rather than after.
+        genres = await _resolve_genres(client, token, meta)
+
         # 1. Create the draft track.
         data = await _graphql(
             client, token, STUDIO_GRAPHQL, "AddTrack", M_ADD_TRACK, {}
@@ -829,7 +946,25 @@ async def upload(
         )
         _progress(75)
 
-        # 3. Attach the uploaded assets to the track.
+        # 3. Wait for BeatStars to finish processing every upload (in
+        #    parallel — earlier files process while later ones upload), then
+        #    attach. Attaching early gets a 0-byte asset; see _wait_until_processed.
+        uploaded = {
+            stream_asset: tagged or master,
+            main_asset: master or tagged,
+            stems_asset: stems,
+            artwork_asset: artwork,
+        }
+        await asyncio.gather(
+            *(
+                _wait_until_processed(client, token, asset_id, path)
+                for asset_id, path in uploaded.items()
+                if asset_id and path is not None
+            )
+        )
+        _progress(80)
+
+        # 4. Attach the uploaded assets to the track.
         if stream_asset:
             await _graphql(
                 client, token, STUDIO_GRAPHQL, "attachStream", M_ATTACH_STREAM,
@@ -852,23 +987,7 @@ async def upload(
             )
         _progress(85)
 
-        # 4. Resolve genre against the live enum, build the form + contracts.
-        genres: list[str] = []
-        if meta.genre:
-            try:
-                md = await _graphql(
-                    client, token, STUDIO_GRAPHQL, "GetMetadataProperties", Q_METADATA, {},
-                    idempotent=True,
-                )
-                menu = (md.get("metadataProperties") or {}).get("genres") or []
-                enum = _match_genre(menu, meta.genre)
-                if enum:
-                    genres = [enum]
-                else:
-                    log.info("Genre %r didn't match a BeatStars enum; skipping", meta.genre)
-            except Exception as exc:  # noqa: BLE001 — genre is optional
-                log.info("Genre lookup skipped: %s", exc)
-
+        # 5. Build the form + contracts.
         track_input = _build_track(meta, genres)
 
         contracts: list[dict] = []
@@ -884,7 +1003,7 @@ async def upload(
         except Exception as exc:  # noqa: BLE001
             log.warning("Contract lookup failed (publishing with defaults): %s", exc)
 
-        # 5. Save then publish.
+        # 6. Save then publish.
         save_vars = {"id": track_id, "track": track_input, "contracts": contracts}
         await _graphql(
             client, token, STUDIO_GRAPHQL, "SaveTrackForm", M_SAVE_TRACK, save_vars

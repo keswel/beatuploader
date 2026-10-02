@@ -563,7 +563,7 @@ export function UploadPage() {
                     ))}
                   </datalist>
                   <div className="text-[10px] text-zinc-600 pt-1">
-                    Leave blank to keep whatever genre BeatStars used last time.
+                    Leave blank to use your BeatStars default genres.
                   </div>
                 </Field>
                 <div className="grid grid-cols-2 gap-3">

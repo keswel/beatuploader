@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import httpx
+from email.utils import format_datetime
 import pytest
 
 from app.security import encrypt_token
@@ -108,7 +109,28 @@ class _FakeConn:
         self.account_label = label
 
 
-def _make_handler(calls: list[str], captured: dict):
+_LISTING_KEYS = {
+    "GetTrackFormAlreadyUploadedAudioAssets": "audioAssets",
+    "GetTrackFormAlreadyUploadedImages": "imageAssets",
+    "GetTrackFormAlreadyUploadedBinaryAssets": "binaryAssets",
+}
+_ATTACH_OPS = {"attachStream", "attachMainAudio", "attachStems", "trackFormAttachArtwork"}
+
+
+def _make_handler(
+    calls: list[str],
+    captured: dict,
+    *,
+    process_after_polls: int = 1,
+    pref_genres: tuple[str, ...] = ("HIP_HOP", "RNB"),
+    server_date: str | None = None,
+):
+    # Like real BeatStars: a new asset is listed with size 0 until it's been
+    # processed (here: after `process_after_polls` listing polls), and
+    # attaching an unprocessed asset fails.
+    polls: dict[str, int] = {}
+    processed: set[str] = set()
+
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         if "s3-accelerate.amazonaws.com" in url:
@@ -138,7 +160,21 @@ def _make_handler(calls: list[str], captured: dict):
         elif op == "createAssetFile":
             name = variables["file"]["fileName"]
             aid = f"AID:{name}"
+            polls[aid] = 0
             data = {"create": {"id": aid, "file": {"assetId": aid, "type": "AUDIO"}}}
+        elif op in _LISTING_KEYS:
+            content = []
+            for aid in polls:
+                polls[aid] += 1
+                if polls[aid] > process_after_polls:
+                    processed.add(aid)
+                size = 1234 if aid in processed else 0
+                content.append({"file": {"assetId": aid, "size": size}})
+            data = {"member": {"assets": {_LISTING_KEYS[op]: {"content": content}}}}
+        elif op in _ATTACH_OPS and variables.get("assetId") not in processed:
+            return httpx.Response(200, json={"errors": [
+                {"message": "The audio file size 0 exceeds the maximum allowed."}
+            ]})
         elif op == "attachStream":
             data = {"attachStreamFile": "Ok"}
         elif op == "attachMainAudio":
@@ -147,6 +183,10 @@ def _make_handler(calls: list[str], captured: dict):
             data = {"attachStemsFile": "Ok"}
         elif op == "trackFormAttachArtwork":
             data = {"attachArtwork": "Ok"}
+        elif op == "fetchTrackPreference":
+            data = {"trackPreference": {"metadata": {
+                "genres": [{"key": g, "value": g.title()} for g in pref_genres]
+            }}}
         elif op == "GetMetadataProperties":
             data = {"metadataProperties": {"genres": [{"key": "TRAP", "value": "Trap"}]}}
         elif op == "GetTrackFormContracts":
@@ -164,7 +204,8 @@ def _make_handler(calls: list[str], captured: dict):
             }}
         else:
             return httpx.Response(200, json={"errors": [{"message": f"unexpected op {op}"}]})
-        return httpx.Response(200, json={"data": data})
+        headers = {"date": server_date} if server_date else {}
+        return httpx.Response(200, json={"data": data}, headers=headers)
 
     return handler
 
@@ -182,7 +223,28 @@ def mock_client(monkeypatch):
     monkeypatch.setattr(
         bh, "_new_client", lambda: httpx.AsyncClient(transport=transport)
     )
+    monkeypatch.setattr(bh, "_ASSET_POLL_INTERVAL_S", 0)
     return mock
+
+
+async def test_upload_times_out_cleanly_if_asset_never_processes(tmp_path, monkeypatch):
+    tagged = tmp_path / "beat.mp3"
+    tagged.write_bytes(b"audio-bytes")
+    transport = httpx.MockTransport(
+        _make_handler([], {}, process_after_polls=10**9)
+    )
+    monkeypatch.setattr(bh, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+    monkeypatch.setattr(bh, "_ASSET_POLL_INTERVAL_S", 0)
+    monkeypatch.setattr(bh, "_ASSET_PROCESS_TIMEOUT_S", 0.05)
+    session = {
+        "access_token": _fake_jwt(), "refresh_token": "r",
+        "expires_at": int(time.time()) + 3600, "member_id": "MR123",
+    }
+    meta = BeatMetadata(
+        title="t", tags=[], bpm=None, music_key=None, price_cents=None, tagged_path=tagged
+    )
+    with pytest.raises(bh.BeatStarsApiError, match="still processing beat.mp3"):
+        await bh.upload(_FakeConn(session, "pw", "keswel"), file_path=tagged, meta=meta)
 
 
 async def test_full_upload_flow(tmp_path, mock_client):
@@ -406,3 +468,64 @@ async def test_login_no_account(monkeypatch):
 
     with pytest.raises(bh.BeatStarsApiError, match="No BeatStars account"):
         await bh.login("ghost@example.com", "secret")
+
+
+def _mock_with(monkeypatch, **handler_kwargs) -> _Mock:
+    mock = _Mock()
+    transport = httpx.MockTransport(_make_handler(mock.calls, mock.captured, **handler_kwargs))
+    monkeypatch.setattr(bh, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+    monkeypatch.setattr(bh, "_ASSET_POLL_INTERVAL_S", 0)
+    return mock
+
+
+def _mp3_only(tmp_path, genre=None):
+    tagged = tmp_path / "beat.mp3"
+    tagged.write_bytes(b"audio-bytes")
+    session = {
+        "access_token": _fake_jwt(), "refresh_token": "r",
+        "expires_at": int(time.time()) + 3600, "member_id": "MR123",
+    }
+    meta = BeatMetadata(
+        title="t", tags=[], bpm=None, music_key=None, price_cents=None,
+        tagged_path=tagged, genre=genre,
+    )
+    return _FakeConn(session, "pw", "keswel"), tagged, meta
+
+
+async def test_no_genre_falls_back_to_account_default_genres(tmp_path, monkeypatch):
+    # BeatStars rejects a publish with no genre ("There are errors in your
+    # request."), so a blank genre uses the account's saved defaults.
+    mock = _mock_with(monkeypatch, pref_genres=("ALTERNATIVE_HIP_HOP", "HIP_HOP"))
+    conn, tagged, meta = _mp3_only(tmp_path)
+    await bh.upload(conn, file_path=tagged, meta=meta)
+    sent = mock.captured["PublishTrackForm"]["track"]["metadata"]["genres"]
+    assert sent == ["ALTERNATIVE_HIP_HOP", "HIP_HOP"]
+
+
+async def test_unmatched_genre_falls_back_to_account_defaults(tmp_path, monkeypatch):
+    mock = _mock_with(monkeypatch, pref_genres=("RNB",))
+    conn, tagged, meta = _mp3_only(tmp_path, genre="Polka Trap")
+    await bh.upload(conn, file_path=tagged, meta=meta)
+    assert mock.captured["PublishTrackForm"]["track"]["metadata"]["genres"] == ["RNB"]
+
+
+async def test_no_genre_anywhere_fails_before_uploading(tmp_path, monkeypatch):
+    mock = _mock_with(monkeypatch, pref_genres=())
+    conn, tagged, meta = _mp3_only(tmp_path)
+    with pytest.raises(bh.BeatStarsApiError, match="requires a genre"):
+        await bh.upload(conn, file_path=tagged, meta=meta)
+    assert "AddTrack" not in mock.calls and "S3_PUT" not in mock.calls
+
+
+async def test_release_date_uses_beatstars_clock_not_local(tmp_path, monkeypatch):
+    # A PC clock running hours fast must not schedule the release in the
+    # future — releaseDate follows the server's Date header.
+    monkeypatch.setattr(bh, "_clock_skew", bh.timedelta(0))
+    server_now = bh.datetime.now(bh.UTC) - bh.timedelta(hours=5)
+    mock = _mock_with(monkeypatch, server_date=format_datetime(server_now, usegmt=True))
+    conn, tagged, meta = _mp3_only(tmp_path, genre="Trap")
+    await bh.upload(conn, file_path=tagged, meta=meta)
+    sent = bh.datetime.fromisoformat(
+        mock.captured["PublishTrackForm"]["track"]["releaseDate"].replace("Z", "+00:00")
+    )
+    assert abs((sent - server_now).total_seconds()) < 10
