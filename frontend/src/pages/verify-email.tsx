@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { motion } from "motion/react";
-import { AlertCircle, CheckCircle2, Disc3, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { Logo } from "@/components/logo";
 
 type State =
   | { kind: "verifying" }
@@ -59,9 +60,7 @@ export function VerifyEmailPage() {
       >
         <div className="flex flex-col items-center mb-6">
           <Link to="/" className="mb-6">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-950 shadow-[0_0_30px_-6px_rgba(255,255,255,0.3)]">
-              <Disc3 className="h-4 w-4" />
-            </div>
+            <Logo className="h-8" />
           </Link>
         </div>
 

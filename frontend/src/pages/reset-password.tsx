@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "motion/react";
-import { Check, CheckCircle2, Disc3, Loader2, X } from "lucide-react";
+import { Check, CheckCircle2, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
@@ -10,6 +10,7 @@ import {
   checkPassword,
   isPasswordValid,
 } from "@/lib/password";
+import { Logo } from "@/components/logo";
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams();
@@ -56,9 +57,7 @@ export function ResetPasswordPage() {
         className="w-full max-w-sm"
       >
         <div className="flex flex-col items-center mb-8">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-950 shadow-[0_0_40px_-6px_rgba(255,255,255,0.3)] mb-4">
-            <Disc3 className="h-5 w-5" />
-          </div>
+          <Logo className="h-10 mb-4" />
           <h1 className="text-xl font-semibold tracking-tight">
             Choose a new password
           </h1>

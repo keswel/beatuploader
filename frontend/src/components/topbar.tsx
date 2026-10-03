@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
-import { Bell, Command, Disc3, Search } from "lucide-react";
+import { Bell, Command, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MobileNav } from "./mobile-nav";
 import { useAuth } from "@/lib/auth";
+import { Logo } from "@/components/logo";
 
 export function Topbar() {
   const { user } = useAuth();
@@ -19,9 +20,7 @@ export function Topbar() {
           className="md:hidden flex items-center gap-2"
           aria-label="Beatuploader"
         >
-          <div className="flex h-6 w-6 items-center justify-center rounded bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-950">
-            <Disc3 className="h-3 w-3" />
-          </div>
+          <Logo className="h-5" />
           <span className="text-sm font-semibold tracking-tight">
             Beatuploader
           </span>

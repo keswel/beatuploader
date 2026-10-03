@@ -3,7 +3,6 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  Disc3,
   LayoutDashboard,
   Library,
   LogOut,
@@ -16,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { IS_DESKTOP } from "@/lib/target";
+import { Logo } from "@/components/logo";
 
 /**
  * Hamburger trigger + slide-in sheet of the same nav items the desktop
@@ -80,9 +80,7 @@ export function MobileNav() {
 
                 <div className="flex h-14 items-center justify-between px-5 border-b border-zinc-800/60">
                   <Link to="/dashboard" className="flex items-center gap-2">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-950">
-                      <Disc3 className="h-4 w-4" />
-                    </div>
+                    <Logo className="h-6" />
                     <span className="text-sm font-semibold tracking-tight">
                       Beatuploader
                     </span>

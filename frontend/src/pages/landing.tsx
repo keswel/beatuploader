@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { Logo } from "@/components/logo";
 
 // Public holding page for beatuploader.app until the first desktop release.
 // Deliberately plain: type and spacing, no glows, badges, or icon cards.
@@ -14,7 +15,10 @@ export function LandingPage() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="mx-auto flex min-h-screen max-w-2xl flex-col px-6">
         <header className="pt-8 sm:pt-10">
-          <span className="text-sm font-semibold tracking-tight">beatuploader</span>
+          <span className="flex items-center gap-2.5 text-sm font-semibold tracking-tight">
+            <Logo className="h-6" />
+            beatuploader
+          </span>
         </header>
 
         <main className="flex-1 pt-24 pb-20 sm:pt-36">

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Logo } from "@/components/logo";
 
 interface Props {
   title: string;
@@ -13,8 +14,9 @@ export function LegalLayout({ title, updated, children }: Props) {
       <div className="w-full max-w-2xl">
         <Link
           to="/"
-          className="inline-block mb-12 text-sm font-semibold tracking-tight text-zinc-100 hover:text-white transition-colors"
+          className="inline-flex items-center gap-2.5 mb-12 text-sm font-semibold tracking-tight text-zinc-100 hover:text-white transition-colors"
         >
+          <Logo className="h-6" />
           beatuploader
         </Link>
 

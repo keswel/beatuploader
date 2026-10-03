@@ -6,12 +6,12 @@ import {
   Plug,
   Library,
   Settings,
-  Disc3,
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { IS_DESKTOP } from "@/lib/target";
+import { Logo } from "@/components/logo";
 
 const navItems = [
   { to: "/dashboard", label: "Overview", icon: LayoutDashboard, end: true },
@@ -29,14 +29,7 @@ export function Sidebar() {
   return (
     <aside className="hidden md:flex w-60 flex-col border-r border-zinc-800/60 bg-zinc-950/40 backdrop-blur-sm">
       <div className="flex h-14 items-center gap-2 px-5 border-b border-zinc-800/60">
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
-          className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-950 shadow-[0_0_20px_-4px_rgba(255,255,255,0.3)]"
-        >
-          <Disc3 className="h-4 w-4" />
-        </motion.div>
+        <Logo className="h-6" />
         <div className="flex flex-col leading-tight">
           <span className="text-sm font-semibold tracking-tight">Beatuploader</span>
           <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Studio</span>

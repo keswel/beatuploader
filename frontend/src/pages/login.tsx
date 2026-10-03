@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
-import { Check, Disc3, Loader2, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth";
@@ -11,6 +11,7 @@ import {
   checkPassword,
   isPasswordValid,
 } from "@/lib/password";
+import { Logo } from "@/components/logo";
 
 type Mode = "login" | "register";
 
@@ -80,9 +81,9 @@ export function LoginPage() {
             initial={{ scale: 0.85, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
-            className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-950 shadow-[0_0_40px_-6px_rgba(255,255,255,0.3)] mb-4"
+            className="mb-4"
           >
-            <Disc3 className="h-5 w-5" />
+            <Logo className="h-10" />
           </motion.div>
           <h1 className="text-xl font-semibold tracking-tight">
             {mode === "login" ? "Sign in" : "Create your account"}
