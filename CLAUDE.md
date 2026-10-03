@@ -34,7 +34,7 @@ beatuploader/
 
 **Auto-update**: `tauri-plugin-updater` checks `https://github.com/keswel/beatuploader/releases/latest/download/latest.json` on launch (+ tray "Check for updates"). Releases are built by `.github/workflows/desktop-release.yml` on a `v*` tag. Signing private key: `~/.tauri/beatuploader-updater.key` (no password) → repo secret `TAURI_SIGNING_PRIVATE_KEY`. **Losing it strands every install on its current version.** Repo must stay public (anonymous release downloads).
 
-**Desktop TODO**: Windows code signing (unsigned installer → SmartScreen warning); privacy policy/terms still describe the hosted service — rewrite for local-only; donations link on the website; Google OAuth verification still needed for non-test users (unchanged); macOS build (Tauri + PyInstaller both support it; the shell's dev path assumes `.venv/Scripts`); FL Studio export-folder watcher in the tray process.
+**Desktop TODO**: Windows code signing (unsigned installer → SmartScreen warning); donations link + download dialog on the website; set up the `hello@beatuploader.app` inbox the legal pages link to; Google OAuth verification still needed for non-test users (unchanged); macOS build (Tauri + PyInstaller both support it; the shell's dev path assumes `.venv/Scripts`); FL Studio export-folder watcher in the tray process.
 
 ## Hosted backend (legacy — kept, not user-facing)
 
@@ -77,10 +77,6 @@ Confirmed fine: the minimal `freeDownloadSettings: {enabled: false}`, and attach
 - Verify is a GraphQL mutation on `/auth/graphql`: `verifyMfa({verifyMfaRequest:{identifier, pin}})` — `pin` is the SMS code; `identifier` is the **resolved BeatStars username** (`profileDetails.username` from `identifierAvailable`, **NOT** the email used for the grant). It returns a one-time code; re-run the password grant with it as `code` to get tokens. Same httpx client throughout so the MFA cookie carries.
 - Relayed through the existing `SmsHandler` + `/platforms/beatstars/sms` endpoint + frontend dialog (unchanged): `on_detected` → endpoint returns `sms_required`; the login coroutine blocks on `asyncio.to_thread(get_code)` until the code arrives.
 - **Daily SMS cap**: BeatStars limits verification SMS per account/day; exhausting it returns 401 `"Maximum number of messages sent today was reached"` (detected + surfaced as a clear "try tomorrow", NOT a creds error). Connect attempts are a scarce daily resource — iterate sparingly. Normal use is unaffected: once connected, uploads reuse the refresh_token (no re-login, no SMS).
-
-### ⚠️ Temporary `[diag]` debug code in `_beatstars_http.py` — REVERT after one clean connect
-
-To debug the live 2FA flow under a scarce daily SMS budget, `_beatstars_http.py` currently surfaces raw error detail to the client in two spots (both marked `# TEMP DIAGNOSTIC`): the `verifyMfa` rejection (`[diag] verifyMfa rejected (identifier=...)`) and any non-MFA 400/401 grant body (`[diag] grant HTTP ...`). These leak response bodies — **revert to the generic messages once a real connect succeeds.**
 
 ### Debug commits reverted
 

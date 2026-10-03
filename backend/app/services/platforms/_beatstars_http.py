@@ -8,8 +8,8 @@ Flow mirrors the web client exactly:
 
   Auth   : identifierAvailable (nice "no account" error) → oauth/token
            grant_type=password → {access_token, refresh_token}. Refresh via
-           grant_type=refresh_token; if that fails the user reconnects — we
-           never store the password.
+           grant_type=refresh_token; if that fails, re-login with the stored
+           (encrypted, local-only) password.
   Upload : AddTrack → (per file) createAssetFile → GET uppy s3/params →
            POST file to S3 presigned form → attach{Stream,MainAudio,Stems}File
            / attachArtwork → SaveTrackForm → PublishTrackForm.
@@ -319,10 +319,10 @@ async def _password_grant(
             "Try connecting again tomorrow."
         )
     if resp.status_code in (400, 401):
-        # TEMP DIAGNOSTIC: surface the raw body to tell genuine bad credentials
-        # apart from a throttle/other error we'd otherwise mislabel. REVERT to
-        # "Wrong BeatStars email or password" once confirmed.
-        raise BeatStarsApiError(f"[diag] grant HTTP {resp.status_code}: {body[:350]}")
+        # Raw body goes to the local log only — it tells real bad credentials
+        # apart from a throttle/other error if this message ever looks wrong.
+        log.warning("BeatStars grant HTTP %s: %s", resp.status_code, body[:500])
+        raise BeatStarsApiError("Wrong BeatStars email or password.")
     # 5xx / gateway timeout — NOT a credential problem; don't mislabel it.
     raise BeatStarsApiError(
         f"BeatStars sign-in is temporarily unavailable (HTTP {resp.status_code}) — "
@@ -444,11 +444,11 @@ async def _complete_mfa(
             origin=OAUTH_ORIGIN,
         )
     except (BeatStarsApiError, _MfaRequired) as exc:
-        # TEMP DIAGNOSTIC: surface BeatStars' real verifyMfa rejection so we can
-        # see the cause (identifier shape vs challenge linkage). REVERT to the
-        # generic message once the live flow is confirmed.
+        # The SMS path hasn't been exercised live yet (home IPs rarely trigger
+        # it) — keep the real rejection in the local log for debugging.
+        log.warning("BeatStars verifyMfa rejected (identifier=%r): %s", identifier, exc)
         raise BeatStarsApiError(
-            f"[diag] verifyMfa rejected (identifier={identifier!r}): {exc}"
+            "BeatStars didn't accept that code. Check it and try connecting again."
         ) from exc
 
     verified = data.get("verifyMfa")
@@ -456,9 +456,9 @@ async def _complete_mfa(
     try:
         return await _password_grant(client, username, password, code=grant_code)
     except (BeatStarsApiError, _MfaRequired) as exc:
-        # TEMP DIAGNOSTIC (see above).
+        log.warning("BeatStars grant after verifyMfa failed (returned %r): %s", verified, exc)
         raise BeatStarsApiError(
-            f"[diag] post-verify grant failed (verifyMfa returned {verified!r}): {exc}"
+            "BeatStars accepted the code but sign-in didn't finish. Try connecting again."
         ) from exc
 
 

@@ -2,115 +2,84 @@ import { LegalLayout } from "./layout";
 
 export function TermsPage() {
   return (
-    <LegalLayout title="Terms of service" updated="2026-05-20">
+    <LegalLayout title="Terms of use" updated="2026-10-02">
       <p>
-        By creating an account or using Beatuploader you agree to these terms.
-        Read them carefully — they're short on purpose.
+        These terms cover the Beatuploader desktop app and this website. By
+        installing or using the app, you agree to them.
       </p>
 
-      <h2>The service</h2>
+      <h2>The app</h2>
       <p>
-        Beatuploader lets you push beats to multiple distribution platforms
-        (BeatStars, YouTube, etc.) from one dashboard. We're an independent
-        product — not affiliated with, endorsed by, or partnered with any of
-        those platforms.
+        Beatuploader is free software that runs on your computer and uploads
+        your beats to platforms you connect, such as BeatStars and YouTube.
+        Its source code is available under the{" "}
+        <a
+          href="https://github.com/keswel/beatuploader/blob/main/LICENSE"
+          target="_blank"
+          rel="noreferrer"
+        >
+          MIT License
+        </a>
+        . Beatuploader is independent and isn't affiliated with, endorsed by
+        or partnered with BeatStars, YouTube or Google.
       </p>
-
-      <h2>Your account</h2>
-      <ul>
-        <li>
-          You're responsible for keeping your password and connected platform
-          credentials safe.
-        </li>
-        <li>
-          You must be old enough to enter a binding contract in your
-          jurisdiction (typically 13+, 18+ in some places).
-        </li>
-        <li>One account per person. Don't share accounts.</li>
-      </ul>
 
       <h2>Your content</h2>
       <p>
-        You own the audio, artwork, and metadata you upload. By uploading,
-        you grant us a non-exclusive license to store, process, and transmit
-        that content for the sole purpose of publishing it to the platforms
-        you've connected. That's it — we don't claim any ownership.
-      </p>
-      <p>
-        You promise that everything you upload is yours to upload (you wrote
-        it, you cleared every sample, you own the cover art rights). You
-        accept full responsibility for any infringement claims arising from
-        your content.
+        You own what you upload. The app only moves it from your computer to
+        the platforms you choose. You're responsible for having the rights to
+        everything you upload, including samples, vocals and cover art.
       </p>
 
-      <h2>Third-party platforms</h2>
+      <h2>Platforms you connect</h2>
       <p>
-        When you connect a platform, you're also bound by that platform's
-        terms (e.g.{" "}
-        <a
-          href="https://www.youtube.com/t/terms"
-          target="_blank"
-          rel="noreferrer"
-        >
-          YouTube
+        When you connect a platform, its own terms apply to your account and
+        to everything published there (for example{" "}
+        <a href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer">
+          YouTube's
+        </a>{" "}
+        and{" "}
+        <a href="https://www.beatstars.com/terms" target="_blank" rel="noreferrer">
+          BeatStars'
         </a>
-        ,{" "}
-        <a
-          href="https://www.beatstars.com/terms"
-          target="_blank"
-          rel="noreferrer"
-        >
-          BeatStars
-        </a>
-        ). Their rules about content, monetization, takedowns, and account
-        suspension apply to anything we publish on your behalf. If a platform
-        bans your account, we can't get you back in.
+        ). BeatStars has no public API, so Beatuploader signs in and uploads
+        the same way the BeatStars website does. BeatStars could change how
+        that works, or object to it, at any time; if it affects your
+        account, that's between you and BeatStars.
       </p>
 
-      <h2>What we don't promise</h2>
-      <ul>
-        <li>
-          We don't promise uptime, that every upload will succeed, or that
-          third-party platforms won't change their UI in a way that breaks an
-          integration (especially BeatStars — see "headless" in our docs).
-        </li>
-        <li>
-          We can suspend accounts that abuse the service (uploading content
-          that triggers platform takedowns, attempting to compromise the
-          system, automating to evade rate limits, etc.).
-        </li>
-      </ul>
+      <h2>No warranty</h2>
+      <p>
+        Beatuploader is provided "as is", without warranties of any kind. We
+        don't promise that every upload will succeed or that integrations
+        will keep working when platforms change. Check that your releases
+        published the way you intended.
+      </p>
 
       <h2>Liability</h2>
       <p>
-        Beatuploader is provided "as is" without warranties. To the maximum
-        extent allowed by law, our total liability for any claim arising from
-        the service is limited to the amount you paid us in the 12 months
-        before the claim — currently zero, since we don't charge yet. We're
-        not liable for indirect, incidental, or consequential damages
-        (lost revenue, lost listeners, etc.).
+        To the maximum extent the law allows, we aren't liable for any
+        damages arising from using Beatuploader, including lost sales, lost
+        data, or actions a platform takes on your account.
       </p>
 
-      <h2>Cancellation</h2>
+      <h2>Donations</h2>
       <p>
-        You can delete your account from{" "}
-        <a href="/settings">Settings → Danger zone</a>. We can terminate
-        access if you breach these terms; we'll try to give a heads-up unless
-        the breach is serious enough that we can't.
+        Donations are voluntary and non-refundable. They don't buy features,
+        support or any other service; the app is the same whether you donate
+        or not.
       </p>
 
       <h2>Changes</h2>
       <p>
-        We may update these terms over time. Material changes will be flagged
-        with a new "Last updated" date and, when significant, emailed to
-        you. Continued use after a change means you accept the updated
-        terms.
+        We may update these terms. The date at the top shows when they last
+        changed, and continuing to use the app after a change means you
+        accept the new terms.
       </p>
 
       <h2>Contact</h2>
       <p>
-        Questions about these terms?{" "}
-        <a href="mailto:hello@beatuploader.com">hello@beatuploader.com</a>.
+        <a href="mailto:hello@beatuploader.app">hello@beatuploader.app</a>
       </p>
     </LegalLayout>
   );

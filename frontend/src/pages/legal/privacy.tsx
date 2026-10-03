@@ -2,67 +2,74 @@ import { LegalLayout } from "./layout";
 
 export function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy policy" updated="2026-05-20">
+    <LegalLayout title="Privacy policy" updated="2026-10-02">
       <p>
-        This page explains what Beatuploader collects, what it does with that
-        information, and the choices you have. We try to keep this short and
-        in plain language; if anything is unclear, email{" "}
-        <a href="mailto:privacy@beatuploader.com">privacy@beatuploader.com</a>.
+        Beatuploader is a desktop app that runs on your own computer. It has
+        no accounts and no servers of ours in the middle: your files, your
+        logins and your upload history stay on your machine. This page
+        explains exactly what that means. Questions:{" "}
+        <a href="mailto:hello@beatuploader.app">hello@beatuploader.app</a>.
       </p>
 
       <h2>What we collect</h2>
-      <ul>
-        <li>
-          <strong>Account info.</strong> Your email, chosen handle, and (if you
-          set one) a bcrypt-hashed password. If you sign in with Google, we
-          also store your Google subject ID so we can recognize you on return.
-        </li>
-        <li>
-          <strong>Platform credentials.</strong> When you connect a third-party
-          platform (YouTube via OAuth, BeatStars via login on your behalf), we
-          store the tokens or session cookies the platform issues, encrypted at
-          rest with a per-deployment key (Fernet/AES-128). For BeatStars
-          specifically, your password is stored encrypted because BeatStars
-          requires re-authentication when the session expires.
-        </li>
-        <li>
-          <strong>Uploads.</strong> The audio files, cover art, and metadata
-          you upload, kept on our storage so we can push them to your
-          connected platforms.
-        </li>
-        <li>
-          <strong>Operational logs.</strong> Standard server logs (request
-          path, status code, timestamps, client IP) and diagnostic HTML/screen
-          captures when a BeatStars upload fails. Diagnostic captures are
-          deleted automatically after 7 days.
-        </li>
-      </ul>
-
-      <h2>What we don't collect</h2>
-      <ul>
-        <li>
-          We don't run analytics or advertising trackers. No third-party
-          fingerprinting scripts.
-        </li>
-        <li>
-          We don't read or store your YouTube watch history or any data
-          unrelated to the upload scopes you granted.
-        </li>
-      </ul>
-
-      <h2>How we use it</h2>
       <p>
-        Solely to make the product work: authenticating you, pushing your
-        beats to platforms you connected, and showing you the status of those
-        uploads. We do not sell your data. We do not share it with third
-        parties except the platforms you've explicitly connected (YouTube,
-        BeatStars, etc.), and only the data needed to publish on your behalf.
+        Nothing. We don't run analytics, crash reporting or tracking in the
+        app, and the app never sends your data to us.
       </p>
+
+      <h2>What the app stores on your computer</h2>
+      <p>
+        Everything below lives in <code>%APPDATA%\Beatuploader</code> on your
+        PC and never leaves it, except when the app sends it to a platform
+        you connected (see the next section).
+      </p>
+      <ul>
+        <li>
+          <strong>Platform sign-ins.</strong> For YouTube, the access and
+          refresh tokens Google issues when you click Connect. For BeatStars,
+          your BeatStars session tokens and your BeatStars password, so the
+          app can sign back in when BeatStars ends the session. These are
+          encrypted, and the encryption key is kept in Windows Credential
+          Manager, separately from the data it protects.
+        </li>
+        <li>
+          <strong>Your uploads.</strong> Copies of the files you add (audio,
+          stems, cover art) and the details you enter (title, BPM, key, tags,
+          genre, price), plus the status of each upload.
+        </li>
+        <li>
+          <strong>Logs.</strong> A local log file used to diagnose failed
+          uploads. It can include error messages returned by BeatStars or
+          YouTube.
+        </li>
+      </ul>
+
+      <h2>Who the app talks to</h2>
+      <ul>
+        <li>
+          <strong>BeatStars and YouTube</strong>, but only the ones you
+          connect, and only to sign in and to publish what you choose to
+          upload. Their own privacy policies apply to what you send them.
+        </li>
+        <li>
+          <strong>GitHub</strong>, to check for app updates and download
+          them. GitHub sees your IP address and the app version, like any
+          download.
+        </li>
+        <li>
+          <strong>Google Fonts</strong>, to load the app's typeface.
+        </li>
+      </ul>
 
       <h2>Google user data</h2>
       <p>
-        Beatuploader's use and transfer of information received from Google
-        APIs adheres to the{" "}
+        Beatuploader requests two YouTube permissions:{" "}
+        <code>youtube.upload</code>, to upload the videos you submit, and{" "}
+        <code>youtube.readonly</code>, to show which channel you connected.
+        Data received from Google APIs is stored only on your computer, is
+        used only for those two purposes, and is never transferred to us or
+        anyone else. Beatuploader's use and transfer of information received
+        from Google APIs adheres to the{" "}
         <a
           href="https://developers.google.com/terms/api-services-user-data-policy"
           target="_blank"
@@ -70,49 +77,51 @@ export function PrivacyPage() {
         >
           Google API Services User Data Policy
         </a>
-        , including the Limited Use requirements. The YouTube scopes we
-        request (<code>youtube.upload</code>, <code>youtube.readonly</code>)
-        are used only to upload videos you submit and to display your channel
-        name.
+        , including the Limited Use requirements.
       </p>
 
-      <h2>Data retention</h2>
+      <h2>Removing your data</h2>
       <ul>
-        <li>Account and upload data: as long as your account exists.</li>
         <li>
-          Diagnostic captures: 7 days, after which they're deleted from disk.
+          <strong>Disconnect a platform</strong> in the app's Platforms page
+          to delete its stored sign-in.
         </li>
         <li>
-          When you delete your account (Settings → Danger zone), everything
-          tied to it — uploads, platform connections, encrypted tokens — is
-          removed.
+          <strong>Revoke YouTube access</strong> at any time from your{" "}
+          <a
+            href="https://myaccount.google.com/permissions"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Google account permissions
+          </a>
+          .
+        </li>
+        <li>
+          <strong>Remove everything</strong> by uninstalling the app, then
+          deleting the <code>%APPDATA%\Beatuploader</code> folder and the
+          "Beatuploader" entry in Windows Credential Manager.
         </li>
       </ul>
 
-      <h2>Security</h2>
+      <h2>This website</h2>
       <p>
-        Passwords are bcrypt-hashed. Platform tokens and BeatStars session
-        cookies are encrypted at rest. All traffic in production is over
-        HTTPS. Internal access is restricted to a small number of operators.
-        No system is perfect, but we treat your data the way we'd want ours
-        treated.
+        beatuploader.app has no analytics or cookies. It's hosted on Vercel,
+        whose servers keep standard request logs (such as IP addresses) to
+        operate the site.
       </p>
 
-      <h2>Your rights</h2>
+      <h2>Donations</h2>
       <p>
-        You can export or delete your data at any time from{" "}
-        <a href="/settings">Settings</a>. If you'd like a copy of everything
-        we hold about you, email{" "}
-        <a href="mailto:privacy@beatuploader.com">privacy@beatuploader.com</a>{" "}
-        and we'll send it within 30 days.
+        If you choose to donate, the payment is handled by the payment
+        provider you're sent to, under its own privacy policy. We receive
+        only what that provider shares with us about the donation.
       </p>
 
-      <h2>Changes to this policy</h2>
+      <h2>Changes</h2>
       <p>
-        If we make material changes we'll update the "Last updated" date at
-        the top and, for substantive changes, notify you by email. Continued
-        use of Beatuploader after a change means you accept the updated
-        policy.
+        If this policy changes, we'll update it here and change the date at
+        the top.
       </p>
     </LegalLayout>
   );

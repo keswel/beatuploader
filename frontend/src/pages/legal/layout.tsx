@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Disc3 } from "lucide-react";
 
 interface Props {
   title: string;
@@ -14,12 +13,9 @@ export function LegalLayout({ title, updated, children }: Props) {
       <div className="w-full max-w-2xl">
         <Link
           to="/"
-          className="inline-flex items-center gap-2 text-zinc-500 hover:text-zinc-300 transition-colors text-xs mb-8"
+          className="inline-block mb-12 text-sm font-semibold tracking-tight text-zinc-100 hover:text-white transition-colors"
         >
-          <div className="flex h-6 w-6 items-center justify-center rounded bg-gradient-to-br from-zinc-200 to-zinc-400 text-zinc-950">
-            <Disc3 className="h-3 w-3" />
-          </div>
-          Beatuploader
+          beatuploader
         </Link>
 
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
@@ -45,7 +41,7 @@ export function LegalLayout({ title, updated, children }: Props) {
           {children}
         </div>
 
-        <div className="mt-16 pt-6 border-t border-zinc-900 flex items-center justify-between text-xs text-zinc-500">
+        <div className="mt-16 pt-6 border-t border-zinc-900 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-600">
           <Link to="/privacy" className="hover:text-zinc-300 transition-colors">
             Privacy
           </Link>
@@ -53,7 +49,7 @@ export function LegalLayout({ title, updated, children }: Props) {
             Terms
           </Link>
           <a
-            href="mailto:hello@beatuploader.com"
+            href="mailto:hello@beatuploader.app"
             className="hover:text-zinc-300 transition-colors"
           >
             Contact
