@@ -34,7 +34,7 @@ beatuploader/
 
 **Auto-update**: `tauri-plugin-updater` checks `https://github.com/keswel/beatuploader/releases/latest/download/latest.json` on launch (+ tray "Check for updates"). Releases are built by `.github/workflows/desktop-release.yml` on a `v*` tag. Signing private key: `~/.tauri/beatuploader-updater.key` (no password) → repo secret `TAURI_SIGNING_PRIVATE_KEY`. **Losing it strands every install on its current version.** Repo must stay public (anonymous release downloads).
 
-**Desktop TODO**: Windows code signing (unsigned installer → SmartScreen warning); donations link + download dialog on the website; set up the `hello@beatuploader.app` inbox the legal pages link to; Google OAuth verification still needed for non-test users (unchanged); macOS build (Tauri + PyInstaller both support it; the shell's dev path assumes `.venv/Scripts`); FL Studio export-folder watcher in the tray process.
+**Desktop TODO**: Windows code signing (unsigned installer → SmartScreen warning); set `VITE_DONATE_URL` in Vercel (donate link on the landing page is hidden until then; download button points at the fixed-name `Beatuploader-setup.exe` release asset); set up the `hello@beatuploader.app` inbox the legal pages link to; Google OAuth verification still needed for non-test users (unchanged); macOS build (Tauri + PyInstaller both support it; the shell's dev path assumes `.venv/Scripts`); FL Studio export-folder watcher in the tray process.
 
 ## Hosted backend (legacy — kept, not user-facing)
 
