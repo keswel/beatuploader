@@ -57,6 +57,7 @@ jobs:
         run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -72,3 +73,16 @@ jobs:
           releaseBody: Download `Beatuploader_*_x64-setup.exe` below to install. Existing installs update themselves.
           releaseDraft: false
           includeUpdaterJson: true
+
+      # The website links to releases/latest/download/Beatuploader-setup.exe,
+      # so every release also carries the installer under that fixed name.
+      - name: Attach fixed-name installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ steps.tauri.outputs.appVersion }}"
+          $exe = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*_${version}_x64-setup.exe | Select-Object -First 1
+          if (-not $exe) { throw "installer for $version not found" }
+          Copy-Item $exe.FullName Beatuploader-setup.exe
+          gh release upload "v$version" Beatuploader-setup.exe --clobber
