@@ -8,8 +8,9 @@ Flow mirrors the web client exactly:
 
   Auth   : identifierAvailable (nice "no account" error) → oauth/token
            grant_type=password → {access_token, refresh_token}. Refresh via
-           grant_type=refresh_token; if that fails, re-login with the stored
-           (encrypted, local-only) password.
+           grant_type=refresh_token (refresh tokens last ~1 year). The
+           password is never stored: when the session finally dies, the
+           user reconnects.
   Upload : AddTrack → (per file) createAssetFile → GET uppy s3/params →
            POST file to S3 presigned form → attach{Stream,MainAudio,Stems}File
            / attachArtwork → SaveTrackForm → PublishTrackForm.
@@ -35,6 +36,7 @@ import httpx
 
 from app.services.platforms.base import (
     BeatMetadata,
+    PlatformSessionExpired,
     ProgressCallback,
     UploadHandle,
 )
@@ -462,13 +464,16 @@ async def _complete_mfa(
         ) from exc
 
 
-async def _ensure_token(
-    client: httpx.AsyncClient, session: dict, *, password: str | None
-) -> str:
-    """Return a valid access token, refreshing (or re-logging-in) if needed.
+class BeatStarsSessionExpired(BeatStarsApiError, PlatformSessionExpired):
+    """The stored BeatStars session can't be renewed — reconnect needed."""
+
+
+async def _ensure_token(client: httpx.AsyncClient, session: dict) -> str:
+    """Return a valid access token, refreshing it if needed.
 
     Mutates ``session`` in place with any new tokens so the caller can persist
-    the rotated refresh token back to the connection.
+    the rotated refresh token back to the connection. We never store the
+    password, so a dead refresh token means the user has to reconnect.
     """
     now = time.time()
     if session.get("access_token") and session.get("expires_at", 0) - _TOKEN_SKEW_S > now:
@@ -480,17 +485,11 @@ async def _ensure_token(
             tokens = await _refresh_grant(client, session["refresh_token"])
             session.update(_session_from_tokens(tokens, account_label=session.get("account_label")))
             return session["access_token"]
-        except BeatStarsApiError:
-            log.info("BeatStars refresh failed; falling back to password re-login")
+        except BeatStarsApiError as exc:
+            log.warning("BeatStars token refresh failed: %s", exc)
 
-    # Refresh dead → re-login with the stored password.
-    if password and session.get("account_label"):
-        tokens = await _password_grant(client, session["account_label"], password)
-        session.update(_session_from_tokens(tokens, account_label=session.get("account_label")))
-        return session["access_token"]
-
-    raise BeatStarsApiError(
-        "BeatStars session expired and couldn't be renewed — reconnect the account."
+    raise BeatStarsSessionExpired(
+        "Your BeatStars sign-in expired. Reconnect BeatStars on the Platforms page."
     )
 
 
@@ -818,22 +817,19 @@ def _build_contracts(track_id: str, meta: BeatMetadata, menu: list[dict]) -> lis
 
 async def connect_with_credentials(
     *, username: str, password: str, sms_handler: SmsHandler | None = None
-) -> tuple[str, str, str]:
-    """Validate creds via the HTTP login. Returns (password_enc, session_enc, label).
+) -> tuple[str | None, str, str]:
+    """Validate creds via the HTTP login. Returns (None, session_enc, label).
 
     Same return contract as the Playwright connect_with_credentials so the API
-    layer is transport-agnostic. ``sms_handler`` relays a 2FA challenge if one
-    fires (logins from the server IP usually trigger it).
+    layer is transport-agnostic — but the password slot is always None: only
+    the session tokens are kept; the password is discarded after login.
+    ``sms_handler`` relays a 2FA challenge if one fires.
     """
     from app.security import encrypt_token
 
     session = await login(username, password, sms_handler=sms_handler)
     label = session.get("account_label") or username
-    return (
-        encrypt_token(password),
-        encrypt_token(json.dumps(session)),
-        label,
-    )
+    return (None, encrypt_token(json.dumps(session)), label)
 
 
 async def upload(
@@ -852,16 +848,8 @@ async def upload(
     if connection.session_data_encrypted:
         try:
             session = json.loads(decrypt_token(connection.session_data_encrypted))
-        except Exception:  # noqa: BLE001 — stale/garbled session → re-login below
+        except Exception:  # noqa: BLE001 — stale/garbled → _ensure_token asks to reconnect
             session = {}
-    password: str | None = None
-    if connection.access_token_encrypted:
-        try:
-            password = decrypt_token(connection.access_token_encrypted)
-        except Exception:  # noqa: BLE001
-            password = None
-    if not session and password and connection.account_label:
-        session = {"account_label": connection.account_label}
 
     def _progress(pct: int) -> None:
         if progress_cb:
@@ -870,156 +858,163 @@ async def upload(
             except Exception:  # noqa: BLE001 — never let progress break an upload
                 pass
 
-    async with _new_client() as client:
-        token = await _ensure_token(client, session, password=password)
-        member_id = session.get("member_id") or ""
+    try:
+        async with _new_client() as client:
+            token = await _ensure_token(client, session)
+            member_id = session.get("member_id") or ""
 
-        # Plan gate — surfaces "you've hit your upload limit" clearly.
-        try:
-            gate = await _graphql(
-                client, token, STUDIO_GRAPHQL, "canCreateTrack", Q_CAN_CREATE, {},
-                idempotent=True,
-            )
-            if gate.get("canCreateTrack") is False:
-                raise BeatStarsApiError(
-                    "BeatStars won't allow a new track — you may have hit your plan's upload limit."
+            # Plan gate — surfaces "you've hit your upload limit" clearly.
+            try:
+                gate = await _graphql(
+                    client, token, STUDIO_GRAPHQL, "canCreateTrack", Q_CAN_CREATE, {},
+                    idempotent=True,
                 )
-        except BeatStarsApiError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            log.info("canCreateTrack check skipped: %s", exc)
+                if gate.get("canCreateTrack") is False:
+                    raise BeatStarsApiError(
+                        "BeatStars won't allow a new track — you may have hit your plan's upload limit."
+                    )
+            except BeatStarsApiError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                log.info("canCreateTrack check skipped: %s", exc)
 
-        # Genre first: BeatStars won't publish without one, so fail before
-        # uploading anything rather than after.
-        genres = await _resolve_genres(client, token, meta)
+            # Genre first: BeatStars won't publish without one, so fail before
+            # uploading anything rather than after.
+            genres = await _resolve_genres(client, token, meta)
 
-        # 1. Create the draft track.
-        data = await _graphql(
-            client, token, STUDIO_GRAPHQL, "AddTrack", M_ADD_TRACK, {}
-        )
-        track_id = data["addTrack"]["id"]
-        _progress(5)
-
-        # 2. Decide file roles. tagged MP3 = stream/preview (required);
-        #    master (WAV/etc) = main download, falling back to the MP3 when
-        #    there's no separate master.
-        tagged = meta.tagged_path
-        master = meta.master_path
-        stems = meta.stems_path
-        artwork = meta.artwork_path
-
-        # Audio roles: the tagged MP3 is the streamable preview (required by our
-        # pipeline); the master (WAV/FLAC/…) is the downloadable main. Cover the
-        # three combinations defensively:
-        #   both          → stream = MP3,    main = master
-        #   MP3 only       → stream = main = the one MP3 (uploaded once)
-        #   master only    → stream = main = the master
-        if tagged is None and master is None:
-            raise BeatStarsApiError("No audio file to upload to BeatStars")
-
-        stream_asset = (
-            await _upload_asset(client, token, member_id, tagged)
-            if tagged is not None
-            else None
-        )
-        _progress(25)
-
-        if master is not None:
-            main_asset = await _upload_asset(client, token, member_id, master)
-        else:
-            main_asset = stream_asset  # MP3-only: same asset is the main download
-        if stream_asset is None:
-            stream_asset = main_asset  # master-only: stream from the master
-        _progress(50)
-
-        stems_asset = (
-            await _upload_asset(client, token, member_id, stems)
-            if stems is not None
-            else None
-        )
-        _progress(65)
-
-        artwork_asset = (
-            await _upload_asset(client, token, member_id, artwork)
-            if artwork is not None
-            else None
-        )
-        _progress(75)
-
-        # 3. Wait for BeatStars to finish processing every upload (in
-        #    parallel — earlier files process while later ones upload), then
-        #    attach. Attaching early gets a 0-byte asset; see _wait_until_processed.
-        uploaded = {
-            stream_asset: tagged or master,
-            main_asset: master or tagged,
-            stems_asset: stems,
-            artwork_asset: artwork,
-        }
-        await asyncio.gather(
-            *(
-                _wait_until_processed(client, token, asset_id, path)
-                for asset_id, path in uploaded.items()
-                if asset_id and path is not None
+            # 1. Create the draft track.
+            data = await _graphql(
+                client, token, STUDIO_GRAPHQL, "AddTrack", M_ADD_TRACK, {}
             )
-        )
-        _progress(80)
+            track_id = data["addTrack"]["id"]
+            _progress(5)
 
-        # 4. Attach the uploaded assets to the track.
-        if stream_asset:
+            # 2. Decide file roles. tagged MP3 = stream/preview (required);
+            #    master (WAV/etc) = main download, falling back to the MP3 when
+            #    there's no separate master.
+            tagged = meta.tagged_path
+            master = meta.master_path
+            stems = meta.stems_path
+            artwork = meta.artwork_path
+
+            # Audio roles: the tagged MP3 is the streamable preview (required by our
+            # pipeline); the master (WAV/FLAC/…) is the downloadable main. Cover the
+            # three combinations defensively:
+            #   both          → stream = MP3,    main = master
+            #   MP3 only       → stream = main = the one MP3 (uploaded once)
+            #   master only    → stream = main = the master
+            if tagged is None and master is None:
+                raise BeatStarsApiError("No audio file to upload to BeatStars")
+
+            stream_asset = (
+                await _upload_asset(client, token, member_id, tagged)
+                if tagged is not None
+                else None
+            )
+            _progress(25)
+
+            if master is not None:
+                main_asset = await _upload_asset(client, token, member_id, master)
+            else:
+                main_asset = stream_asset  # MP3-only: same asset is the main download
+            if stream_asset is None:
+                stream_asset = main_asset  # master-only: stream from the master
+            _progress(50)
+
+            stems_asset = (
+                await _upload_asset(client, token, member_id, stems)
+                if stems is not None
+                else None
+            )
+            _progress(65)
+
+            artwork_asset = (
+                await _upload_asset(client, token, member_id, artwork)
+                if artwork is not None
+                else None
+            )
+            _progress(75)
+
+            # 3. Wait for BeatStars to finish processing every upload (in
+            #    parallel — earlier files process while later ones upload), then
+            #    attach. Attaching early gets a 0-byte asset; see _wait_until_processed.
+            uploaded = {
+                stream_asset: tagged or master,
+                main_asset: master or tagged,
+                stems_asset: stems,
+                artwork_asset: artwork,
+            }
+            await asyncio.gather(
+                *(
+                    _wait_until_processed(client, token, asset_id, path)
+                    for asset_id, path in uploaded.items()
+                    if asset_id and path is not None
+                )
+            )
+            _progress(80)
+
+            # 4. Attach the uploaded assets to the track.
+            if stream_asset:
+                await _graphql(
+                    client, token, STUDIO_GRAPHQL, "attachStream", M_ATTACH_STREAM,
+                    {"id": track_id, "assetId": stream_asset},
+                )
+            if main_asset:
+                await _graphql(
+                    client, token, STUDIO_GRAPHQL, "attachMainAudio", M_ATTACH_MAIN,
+                    {"id": track_id, "assetId": main_asset},
+                )
+            if stems_asset:
+                await _graphql(
+                    client, token, STUDIO_GRAPHQL, "attachStems", M_ATTACH_STEMS,
+                    {"id": track_id, "assetId": stems_asset},
+                )
+            if artwork_asset:
+                await _graphql(
+                    client, token, STUDIO_GRAPHQL, "trackFormAttachArtwork", M_ATTACH_ARTWORK,
+                    {"itemId": track_id, "assetId": artwork_asset},
+                )
+            _progress(85)
+
+            # 5. Build the form + contracts.
+            track_input = _build_track(meta, genres)
+
+            contracts: list[dict] = []
+            try:
+                cdata = await _graphql(
+                    client, token, STUDIO_GRAPHQL, "GetTrackFormContracts", Q_CONTRACTS,
+                    {"itemId": track_id, "page": 0, "size": 50}, idempotent=True,
+                )
+                menu = (cdata.get("publishedContracts") or {}).get("content") or []
+                contracts = _build_contracts(track_id, meta, menu)
+            except BeatStarsApiError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Contract lookup failed (publishing with defaults): %s", exc)
+
+            # 6. Save then publish.
+            save_vars = {"id": track_id, "track": track_input, "contracts": contracts}
             await _graphql(
-                client, token, STUDIO_GRAPHQL, "attachStream", M_ATTACH_STREAM,
-                {"id": track_id, "assetId": stream_asset},
+                client, token, STUDIO_GRAPHQL, "SaveTrackForm", M_SAVE_TRACK, save_vars
             )
-        if main_asset:
-            await _graphql(
-                client, token, STUDIO_GRAPHQL, "attachMainAudio", M_ATTACH_MAIN,
-                {"id": track_id, "assetId": main_asset},
+            _progress(92)
+
+            pub = await _graphql(
+                client, token, STUDIO_GRAPHQL, "PublishTrackForm", M_PUBLISH_TRACK, save_vars
             )
-        if stems_asset:
-            await _graphql(
-                client, token, STUDIO_GRAPHQL, "attachStems", M_ATTACH_STEMS,
-                {"id": track_id, "assetId": stems_asset},
+            published = pub.get("publishTrack") or {}
+            public_url = published.get("url") or published.get("shareUrl")
+            _progress(100)
+
+            return UploadHandle(
+                external_id=str(published.get("id") or track_id),
+                public_url=public_url,
+                # Persisted back by the job processor — keeps rotated tokens warm.
+                session_data=session,
             )
-        if artwork_asset:
-            await _graphql(
-                client, token, STUDIO_GRAPHQL, "trackFormAttachArtwork", M_ATTACH_ARTWORK,
-                {"itemId": track_id, "assetId": artwork_asset},
-            )
-        _progress(85)
-
-        # 5. Build the form + contracts.
-        track_input = _build_track(meta, genres)
-
-        contracts: list[dict] = []
-        try:
-            cdata = await _graphql(
-                client, token, STUDIO_GRAPHQL, "GetTrackFormContracts", Q_CONTRACTS,
-                {"itemId": track_id, "page": 0, "size": 50}, idempotent=True,
-            )
-            menu = (cdata.get("publishedContracts") or {}).get("content") or []
-            contracts = _build_contracts(track_id, meta, menu)
-        except BeatStarsApiError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Contract lookup failed (publishing with defaults): %s", exc)
-
-        # 6. Save then publish.
-        save_vars = {"id": track_id, "track": track_input, "contracts": contracts}
-        await _graphql(
-            client, token, STUDIO_GRAPHQL, "SaveTrackForm", M_SAVE_TRACK, save_vars
-        )
-        _progress(92)
-
-        pub = await _graphql(
-            client, token, STUDIO_GRAPHQL, "PublishTrackForm", M_PUBLISH_TRACK, save_vars
-        )
-        published = pub.get("publishTrack") or {}
-        public_url = published.get("url") or published.get("shareUrl")
-        _progress(100)
-
-        return UploadHandle(
-            external_id=str(published.get("id") or track_id),
-            public_url=public_url,
-            # Persisted back by the job processor — keeps rotated tokens warm.
-            session_data=session,
-        )
+    except Exception as exc:
+        # BeatStars rotates the refresh token on every refresh. If this upload
+        # refreshed and then failed, hand the new session back anyway so the job
+        # runner persists it — losing it would force the user to reconnect.
+        exc.session_data = session  # type: ignore[attr-defined]
+        raise

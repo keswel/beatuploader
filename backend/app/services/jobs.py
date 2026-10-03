@@ -14,7 +14,7 @@ from app.models.upload import UploadJob, UploadStatus
 from app.models.user import User
 from app.schemas.upload import UploadCreate
 from app.services.platforms import get_connector
-from app.services.platforms.base import BeatMetadata
+from app.services.platforms.base import BeatMetadata, PlatformSessionExpired
 
 log = logging.getLogger(__name__)
 
@@ -259,6 +259,21 @@ async def _process(job_id: int, user_id: int, payload: UploadCreate) -> None:
                     await db.commit()
             except Exception as exc:  # noqa: BLE001
                 log.exception("Upload to %s failed for job %s", provider, job_id)
+                if isinstance(exc, PlatformSessionExpired):
+                    # Flag the connection so the Platforms page asks for a
+                    # reconnect, instead of every upload failing the same way.
+                    connection.status = PlatformStatus.error
+                    connection.last_error = str(exc)[:500]
+                # Connectors may attach a refreshed session to the error (BeatStars
+                # rotates refresh tokens) — persist it so the next upload works.
+                failed_session = getattr(exc, "session_data", None)
+                if failed_session is not None and not isinstance(exc, PlatformSessionExpired):
+                    from app.security import encrypt_token
+                    from app.services.platforms._browser import serialize_storage_state
+
+                    connection.session_data_encrypted = encrypt_token(
+                        serialize_storage_state(failed_session)
+                    )
                 targets[provider_str] = {
                     "status": "failed",
                     "progress": 0,

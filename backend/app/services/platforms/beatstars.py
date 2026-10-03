@@ -1175,8 +1175,11 @@ async def connect_with_credentials(
     username: str,
     password: str,
     sms_handler: SmsHandler | None = None,
-) -> tuple[str, str, str]:
+) -> tuple[str | None, str, str]:
     """Validate credentials by logging in. Returns (encrypted_password, encrypted_session, label).
+
+    The default HTTP transport returns None for the password — it's never
+    stored. Only the legacy Playwright fallback still keeps it.
 
     If ``sms_handler`` is provided and BeatStars challenges us with 2FA, the
     handler bridges the code between the API endpoint and this login thread.

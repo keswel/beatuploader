@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import httpx
+from app.security import decrypt_token
 from email.utils import format_datetime
 import pytest
 
@@ -103,9 +104,11 @@ def _fake_jwt(member_id: str = "MR123", ttl: int = 3600) -> str:
 
 
 class _FakeConn:
-    def __init__(self, session: dict, password: str, label: str):
+    # `password` is accepted for call-site compatibility but, like the real
+    # app, never stored — connections carry only the session.
+    def __init__(self, session: dict, password: str | None, label: str):
         self.session_data_encrypted = encrypt_token(json.dumps(session))
-        self.access_token_encrypted = encrypt_token(password)
+        self.access_token_encrypted = None
         self.account_label = label
 
 
@@ -529,3 +532,72 @@ async def test_release_date_uses_beatstars_clock_not_local(tmp_path, monkeypatch
         mock.captured["PublishTrackForm"]["track"]["releaseDate"].replace("Z", "+00:00")
     )
     assert abs((sent - server_now).total_seconds()) < 10
+
+
+async def test_connect_discards_the_password(monkeypatch):
+    async def fake_login(username, password, *, sms_handler=None):
+        return {"access_token": _fake_jwt(), "refresh_token": "r", "account_label": "keswel"}
+
+    monkeypatch.setattr(bh, "login", fake_login)
+    password_enc, session_enc, label = await bh.connect_with_credentials(
+        username="keswel@example.com", password="hunter2"
+    )
+    assert password_enc is None
+    assert "hunter2" not in decrypt_token(session_enc)
+    assert label == "keswel"
+
+
+async def test_dead_refresh_token_asks_to_reconnect(monkeypatch):
+    """No stored password to fall back on: a dead session must surface as
+    PlatformSessionExpired (so the job runner flags the connection), and must
+    never attempt a password grant."""
+    from app.services.platforms.base import PlatformSessionExpired
+
+    grants: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/auth/oauth/token" in str(request.url):
+            grants.append(request.content)
+            return httpx.Response(401, json={"error": "invalid_grant"})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(bh, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+    expired = {
+        "access_token": _fake_jwt(ttl=-10), "refresh_token": "dead",
+        "expires_at": int(time.time()) - 10, "member_id": "MR123",
+        "account_label": "keswel",
+    }
+    tagged = Path(__file__)  # any existing file; we fail before uploading
+    meta = BeatMetadata(title="t", tags=[], bpm=None, music_key=None, price_cents=None,
+                        tagged_path=tagged, genre="Trap")
+
+    with pytest.raises(PlatformSessionExpired, match="Reconnect BeatStars"):
+        await bh.upload(_FakeConn(expired, None, "keswel"), file_path=tagged, meta=meta)
+    assert grants and all(b"grant_type=refresh_token" in g for g in grants)
+
+
+async def test_failed_upload_still_returns_rotated_session(tmp_path, monkeypatch):
+    """BeatStars rotates the refresh token on every refresh. If an upload
+    refreshes and then fails, the new session must ride along on the error so
+    the job runner persists it — otherwise the user is forced to reconnect."""
+    inner = _make_handler([], {}, pref_genres=())  # no genre anywhere → fails after refresh
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/auth/oauth/token" in str(request.url):
+            return httpx.Response(200, json={
+                "access_token": _fake_jwt(), "refresh_token": "rotated-refresh"})
+        return inner(request)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(bh, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+    expired = {
+        "access_token": _fake_jwt(ttl=-10), "refresh_token": "old-refresh",
+        "expires_at": 0, "member_id": "MR123", "account_label": "keswel",
+    }
+    conn, tagged, meta = _mp3_only(tmp_path)
+    conn.session_data_encrypted = encrypt_token(json.dumps(expired))
+
+    with pytest.raises(bh.BeatStarsApiError, match="requires a genre") as info:
+        await bh.upload(conn, file_path=tagged, meta=meta)
+    assert info.value.session_data["refresh_token"] == "rotated-refresh"

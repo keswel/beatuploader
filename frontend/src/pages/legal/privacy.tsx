@@ -27,10 +27,10 @@ export function PrivacyPage() {
         <li>
           <strong>Platform sign-ins.</strong> For YouTube, the access and
           refresh tokens Google issues when you click Connect. For BeatStars,
-          your BeatStars session tokens and your BeatStars password, so the
-          app can sign back in when BeatStars ends the session. These are
-          encrypted, and the encryption key is kept in Windows Credential
-          Manager, separately from the data it protects.
+          the session tokens BeatStars issues when you sign in. Your BeatStars
+          password is used only for that sign-in and is never stored. The
+          tokens are encrypted, and the encryption key is kept in Windows
+          Credential Manager, separately from the data it protects.
         </li>
         <li>
           <strong>Your uploads.</strong> Copies of the files you add (audio,

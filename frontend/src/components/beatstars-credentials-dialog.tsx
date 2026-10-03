@@ -107,7 +107,7 @@ export function BeatStarsCredentialsDialog({ open, onOpenChange }: Props) {
             {isSms
               ? stage.hint ||
                 "BeatStars sent a verification code to your phone."
-              : "BeatStars has no public API, so we log in on your behalf. Your password is encrypted at rest and only used to keep your session alive."}
+              : "BeatStars has no public API, so the app signs in for you. Your password is used only for this sign-in and is never stored. The app keeps just the session, which lasts about a year."}
           </DialogDescription>
         </DialogHeader>
 

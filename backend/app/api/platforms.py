@@ -249,7 +249,7 @@ async def soundcloud_callback(
 
 
 async def _persist_beatstars_connection(
-    *, db, user_id: int, password_enc: str, session_enc: str, label: str
+    *, db, user_id: int, password_enc: str | None, session_enc: str, label: str
 ) -> None:
     existing = await db.scalar(
         select(PlatformConnection).where(
@@ -264,7 +264,9 @@ async def _persist_beatstars_connection(
         db.add(existing)
 
     existing.account_label = label
-    existing.access_token_encrypted = password_enc  # password lives here for headless providers
+    # None on the default HTTP transport (password never stored); only the
+    # legacy Playwright fallback puts an encrypted password here.
+    existing.access_token_encrypted = password_enc
     existing.session_data_encrypted = session_enc
     existing.status = PlatformStatus.connected
     existing.last_error = None

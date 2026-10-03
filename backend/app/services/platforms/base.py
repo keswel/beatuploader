@@ -15,6 +15,14 @@ from app.models.platform import PlatformConnection, PlatformProvider
 ProgressCallback = Callable[[int], None]
 
 
+class PlatformSessionExpired(Exception):
+    """A connection's stored sign-in no longer works; the user must reconnect.
+
+    The job runner marks the connection as errored so the Platforms page
+    prompts for it, instead of every upload failing with a generic error.
+    """
+
+
 class AuthMethod(str, enum.Enum):
     oauth = "oauth"
     api_key = "api_key"
