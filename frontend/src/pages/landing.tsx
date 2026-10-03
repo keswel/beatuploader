@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { Logo } from "@/components/logo";
+import { DONATE_URL, DOWNLOAD_URL } from "@/lib/target";
 
-// Public holding page for beatuploader.app until the first desktop release.
+// Public page for beatuploader.app: what it does, download, donate.
 // Deliberately plain: type and spacing, no glows, badges, or icon cards.
 
 const WHAT_IT_DOES = [
@@ -44,10 +45,36 @@ export function LandingPage() {
             ))}
           </ol>
 
-          <p className="mt-14 flex items-center gap-2.5 text-sm text-zinc-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden />
-            Coming soon
-          </p>
+          <div className="mt-14">
+            <a
+              href={DOWNLOAD_URL}
+              className="inline-flex items-center rounded-md bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-950 transition-colors hover:bg-white"
+            >
+              Download for Windows
+            </a>
+            <p className="mt-3 max-w-md text-sm leading-relaxed text-zinc-500">
+              Windows 10 or 11. The installer isn&apos;t code-signed yet, so
+              Windows may show &ldquo;Windows protected your PC&rdquo;. Click{" "}
+              <span className="text-zinc-300">More info</span>, then{" "}
+              <span className="text-zinc-300">Run anyway</span>. The app updates
+              itself after that.
+            </p>
+          </div>
+
+          {DONATE_URL && (
+            <p className="mt-10 text-sm text-zinc-400">
+              Beatuploader is free. If it saves you time,{" "}
+              <a
+                href={DONATE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-100 underline decoration-zinc-600 underline-offset-4 transition-colors hover:decoration-zinc-300"
+              >
+                you can donate here
+              </a>
+              .
+            </p>
+          )}
           <p className="mt-2 text-sm text-zinc-600">
             FL Studio export detection is next on the list.
           </p>
