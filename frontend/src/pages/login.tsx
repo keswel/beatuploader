@@ -83,7 +83,7 @@ export function LoginPage() {
             transition={{ duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
             className="mb-4"
           >
-            <Logo className="h-10" />
+            <Logo className="h-7" />
           </motion.div>
           <h1 className="text-xl font-semibold tracking-tight">
             {mode === "login" ? "Sign in" : "Create your account"}

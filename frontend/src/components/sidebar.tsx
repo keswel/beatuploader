@@ -29,7 +29,7 @@ export function Sidebar() {
   return (
     <aside className="hidden md:flex w-60 flex-col border-r border-zinc-800/60 bg-zinc-950/40 backdrop-blur-sm">
       <div className="flex h-14 items-center gap-2 px-5 border-b border-zinc-800/60">
-        <Logo className="h-6" />
+        <Logo className="h-4" />
         <div className="flex flex-col leading-tight">
           <span className="text-sm font-semibold tracking-tight">Beatuploader</span>
           <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Studio</span>
