@@ -96,6 +96,7 @@
 }
 .landing .btn:hover { transform: translate(-3px, -3px); box-shadow: 3px 3px 0 var(--ink), 3px 3px 0 1px var(--lilac); }
 .landing .btn:active { transform: none; box-shadow: none; }
+.landing .btn:disabled { cursor: default; opacity: 0.55; transform: none; box-shadow: none; }
 .landing .btn svg { width: 18px; height: 18px; }
 .landing .meta { font-size: 14px; color: var(--ink-soft); }
 
