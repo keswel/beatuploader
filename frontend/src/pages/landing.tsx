@@ -6,6 +6,9 @@ import { DONATE_URL, DOWNLOAD_URL } from "@/lib/target";
 // Public page for beatuploader.app: what it does, download, donate.
 // Cut-paper collage over generated skies; styles live in landing.css.
 
+// Off until the installer is ready to hand out: the buttons read "Coming soon".
+const DOWNLOAD_ENABLED = false;
+
 const STEPS = [
   { title: "Add your files", body: "The tagged MP3, plus the WAV, stems and cover art if you have them." },
   { title: "Check the details", body: "Licenses are picked from the files you added. Set a price if you want one." },
@@ -123,10 +126,12 @@ export function LandingPage() {
                 <DownloadButton onClick={onDownload} />
                 <span className="meta">Free, for Windows 10 and 11</span>
               </div>
-              <details>
-                <summary>Windows says "Windows protected your PC"</summary>
-                <SmartScreenHelp />
-              </details>
+              {DOWNLOAD_ENABLED && (
+                <details>
+                  <summary>Windows says "Windows protected your PC"</summary>
+                  <SmartScreenHelp />
+                </details>
+              )}
               {DONATE_URL && (
                 <p className="donate">
                   Beatuploader is free. If it saves you time,{" "}
@@ -149,6 +154,13 @@ export function LandingPage() {
 }
 
 function DownloadButton({ onClick }: { onClick: () => void }) {
+  if (!DOWNLOAD_ENABLED) {
+    return (
+      <button type="button" className="btn" disabled>
+        Coming soon
+      </button>
+    );
+  }
   return (
     <a className="btn" href={DOWNLOAD_URL} onClick={onClick}>
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="square" aria-hidden>
