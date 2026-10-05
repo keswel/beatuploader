@@ -80,7 +80,7 @@ export function MobileNav() {
 
                 <div className="flex h-14 items-center justify-between px-5 border-b border-zinc-800/60">
                   <Link to="/dashboard" className="flex items-center gap-2">
-                    <Logo className="h-6" />
+                    <Logo className="h-4" />
                     <span className="text-sm font-semibold tracking-tight">
                       Beatuploader
                     </span>

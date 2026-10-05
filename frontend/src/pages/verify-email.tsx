@@ -60,7 +60,7 @@ export function VerifyEmailPage() {
       >
         <div className="flex flex-col items-center mb-6">
           <Link to="/" className="mb-6">
-            <Logo className="h-8" />
+            <Logo className="h-6" />
           </Link>
         </div>
 

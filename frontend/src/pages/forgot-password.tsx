@@ -38,7 +38,7 @@ export function ForgotPasswordPage() {
         className="w-full max-w-sm"
       >
         <div className="flex flex-col items-center mb-8">
-          <Logo className="h-10 mb-4" />
+          <Logo className="h-7 mb-4" />
           <h1 className="text-xl font-semibold tracking-tight">
             Reset your password
           </h1>

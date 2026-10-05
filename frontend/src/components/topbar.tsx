@@ -20,7 +20,7 @@ export function Topbar() {
           className="md:hidden flex items-center gap-2"
           aria-label="Beatuploader"
         >
-          <Logo className="h-5" />
+          <Logo className="h-4" />
           <span className="text-sm font-semibold tracking-tight">
             Beatuploader
           </span>
