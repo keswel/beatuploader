@@ -335,7 +335,8 @@ Beat
 
 ## Key design choices to preserve
 
-- **Dark/expensive aesthetic** — Vercel/Linear vibe. zinc-950 base, monochrome, color only signals state. `.lift` for card hover, `.glass` for sticky surfaces. iOS spring easing (`cubic-bezier(0.32, 0.72, 0, 1)`). Don't add color "for fun."
+- **Website (landing + privacy/terms) is a light "cut-paper collage"** — separate from the app's dark look. Generated posterized skies (`lib/collage-sky.ts`, seeded noise on a canvas, no image assets), white paper panels with ink outlines, Bodoni Moda (low `opsz` so hairlines stay readable) + Zen Kaku Gothic New, a CSS-drawn Windows 98 dialog. Styles in `pages/landing.css`, scoped under `.landing`; shared header/footer/sky section in `components/site-chrome.tsx`. Download opens a "Download started" Win98 dialog with install help and one quiet donate ask (only when `VITE_DONATE_URL` is set). Brand mark is now the wave only (`public/logo-wave.svg`; desktop icons regenerated from `desktop/src-tauri/app-icon.svg` via `npx tauri icon`).
+- **Dark/expensive aesthetic (the app)** — Vercel/Linear vibe. zinc-950 base, monochrome, color only signals state. `.lift` for card hover, `.glass` for sticky surfaces. iOS spring easing (`cubic-bezier(0.32, 0.72, 0, 1)`). Don't add color "for fun."
 - **motion library, not framer-motion** — `motion` is the rebranded package. Import from `motion/react`.
 - **Sliding sidebar pill** uses `layoutId="sidebar-pill"`. Don't replace with hardcoded active styles.
 - **Windows asyncio + Playwright** — Uvicorn on Windows uses `WindowsSelectorEventLoopPolicy` which doesn't support subprocesses. `app/main.py` sets `WindowsProactorEventLoopPolicy` at module top *before* any other imports. Headless connectors use **sync Playwright** wrapped in `asyncio.to_thread` (see `services/platforms/_browser.py`). Don't switch to async Playwright on Windows.

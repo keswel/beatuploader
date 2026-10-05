@@ -2,7 +2,7 @@ import { LegalLayout } from "./layout";
 
 export function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy policy" updated="2026-10-02">
+    <LegalLayout title="Privacy policy" updated="2026-10-05">
       <p>
         Beatuploader is a desktop app that runs on your own computer. It has
         no accounts and no servers of ours in the middle: your files, your
@@ -108,7 +108,8 @@ export function PrivacyPage() {
       <p>
         beatuploader.app has no analytics or cookies. It's hosted on Vercel,
         whose servers keep standard request logs (such as IP addresses) to
-        operate the site.
+        operate the site. Its typefaces load from Google Fonts, so Google
+        sees your IP address when you visit.
       </p>
 
       <h2>Donations</h2>
