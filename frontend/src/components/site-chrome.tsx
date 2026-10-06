@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigationType } from "react-router-dom";
 import { paintSky, SKY_PRESETS } from "@/lib/collage-sky";
 import "@/pages/landing.css";
 
@@ -39,6 +39,24 @@ export function SiteFooter() {
       </div>
     </footer>
   );
+}
+
+/**
+ * The router keeps the old scroll position on in-site links, so a link clicked
+ * halfway down the landing page opened the next page halfway down too. On every
+ * new navigation, jump to the #anchor if there is one, else to the top. Back and
+ * forward (POP) are left alone so the browser can restore where you were.
+ */
+export function ScrollOnNavigate() {
+  const { pathname, hash } = useLocation();
+  const navType = useNavigationType();
+  useEffect(() => {
+    if (navType === "POP") return;
+    const target = hash && document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (target) target.scrollIntoView();
+    else window.scrollTo(0, 0);
+  }, [pathname, hash, navType]);
+  return null;
 }
 
 /** A section whose background is a generated sky, repainted when its size changes. */
