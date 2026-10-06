@@ -2,6 +2,7 @@ from app.models.beat import Beat, BeatPlatformStatus
 from app.models.platform import PlatformConnection, PlatformProvider, PlatformStatus
 from app.models.upload import UploadJob, UploadStatus
 from app.models.user import User
+from app.models.waitlist import WaitlistSignup
 
 __all__ = [
     "Beat",
@@ -12,4 +13,5 @@ __all__ = [
     "UploadJob",
     "UploadStatus",
     "User",
+    "WaitlistSignup",
 ]

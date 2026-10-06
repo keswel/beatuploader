@@ -94,6 +94,16 @@ async function request<T>(
 }
 
 export const api = {
+  /** Landing-page early-release signup (hosted backend only). */
+  waitlist: {
+    count: () => request<{ count: number }>("/waitlist/count", { auth: false }),
+    join: (email: string) =>
+      request<void>("/waitlist", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+        auth: false,
+      }),
+  },
   auth: {
     register: (payload: { email: string; handle: string; password: string }) =>
       request<Token>("/auth/register", {

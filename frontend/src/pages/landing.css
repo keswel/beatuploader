@@ -205,6 +205,41 @@
 .landing .donate { margin: 0; font-size: 14.5px; color: var(--ink-soft); padding-top: 18px; border-top: 1px solid var(--ink); }
 .landing .donate a { color: var(--ink); font-weight: 700; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--lilac); text-decoration-thickness: 2px; }
 
+/* Early-release signup: a second sheet pasted below and offset from the first. */
+.landing .early { max-width: 520px; margin: 28px 0 0 clamp(0px, 8vw, 120px); padding: clamp(22px, 2.6vw, 32px); display: grid; gap: 14px; }
+.landing .early h2 { font-size: clamp(1.9rem, 3.2vw, 2.6rem); font-style: italic; }
+.landing .early p { margin: 0; color: var(--ink-soft); }
+.landing .early-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+/* A torn-off ticket stub: tabular figure in the display face, lilac underline. */
+.landing .early-count { font-size: 13.5px; color: var(--ink-soft); white-space: nowrap; }
+.landing .early-count b {
+  font: italic 600 22px/1 var(--display); font-variation-settings: "opsz" 18;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+  border-bottom: 2px solid var(--lilac); margin-right: 2px;
+}
+.landing .early-form { display: flex; flex-wrap: wrap; gap: 10px; }
+.landing .early-form input {
+  flex: 1 1 220px; min-width: 0;
+  font: 16px/1 var(--text); color: var(--ink);
+  background: #fff; border: 1px solid var(--ink); border-radius: 0;
+  padding: 15px 14px;
+}
+.landing .early-form input::placeholder { color: #8a92a6; }
+.landing .early-form input[aria-invalid] { box-shadow: inset 0 0 0 1px var(--ink); }
+.landing .early-form .btn[disabled] { opacity: 0.6; cursor: progress; transform: none; box-shadow: none; }
+.landing .early .early-error { color: var(--ink); font-size: 14.5px; }
+.landing .early .early-fine { font-size: 13px; }
+.landing .early .early-fine a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.landing .early-why { color: var(--ink); font-weight: 700; white-space: nowrap; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--lilac); text-decoration-thickness: 2px; }
+.landing .early-why::after { content: " →"; }
+
+/* ---------- early access page ---------- */
+.landing .ea-head .wrap { display: grid; justify-items: start; gap: clamp(20px, 3vw, 32px); padding-block: clamp(56px, 8vw, 112px) clamp(64px, 9vw, 128px); }
+.landing .ea-head h1 { grid-row: auto; grid-column: auto; margin: 0; }
+.landing .ea-intro { max-width: 34em; margin-left: clamp(0px, 10vw, 150px); padding: clamp(20px, 2.4vw, 32px); }
+.landing .ea-intro p { margin: 0; font-size: clamp(16px, 1.35vw, 18px); }
+.landing .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
 .landing footer { background: var(--ink); color: var(--haze); }
 .landing footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; padding-block: 22px; font-size: 13px; }
 .landing footer a:hover { color: #fff; }
@@ -237,6 +272,8 @@
   .landing .steps li:nth-child(3) { margin-left: 16%; }
   .landing .local h2,
   .landing .local .cols { grid-column: 1 / -1; }
+  .landing .early { margin-left: 0; }
+  .landing .ea-intro { margin-left: 0; }
 }
 @media (max-width: 560px) {
   .landing .top nav a:not(:last-child) { display: none; }

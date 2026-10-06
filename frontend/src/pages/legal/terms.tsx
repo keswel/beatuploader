@@ -2,7 +2,7 @@ import { LegalLayout } from "./layout";
 
 export function TermsPage() {
   return (
-    <LegalLayout title="Terms of use" updated="2026-10-02">
+    <LegalLayout title="Terms of use" updated="2026-10-06">
       <p>
         These terms cover the Beatuploader desktop app and this website. By
         installing or using the app, you agree to them.
@@ -10,9 +10,9 @@ export function TermsPage() {
 
       <h2>The app</h2>
       <p>
-        Beatuploader is free software that runs on your computer and uploads
+        Beatuploader is software that runs on your computer and uploads
         your beats to platforms you connect, such as BeatStars and YouTube.
-        Its source code is available under the{" "}
+        Uploading to those platforms is free. The core app's source code is available under the{" "}
         <a
           href="https://github.com/keswel/beatuploader/blob/main/LICENSE"
           target="_blank"
@@ -63,11 +63,26 @@ export function TermsPage() {
         data, or actions a platform takes on your account.
       </p>
 
+      <h2 id="founding-members">Premium and founding members</h2>
+      <p>
+        Some features, such as automatic videos and one-click uploads from FL
+        Studio, will be part of a paid Premium tier. Premium isn't available
+        yet. Uploading to the platforms you connect stays free.
+      </p>
+      <p>
+        The first 50 people to join the early-release list on this website
+        are founding members. Founding members get Premium free for as long
+        as Beatuploader offers Premium, including Premium features added
+        later. Spots go in the order signups were received. Founding
+        membership is one per person, is tied to the email address used to
+        sign up, and can't be transferred or sold. We may decline signups
+        that look automated or duplicated.
+      </p>
+
       <h2>Donations</h2>
       <p>
-        Donations are voluntary and non-refundable. They don't buy features,
-        support or any other service; the app is the same whether you donate
-        or not.
+        Donations are voluntary and non-refundable. They don't buy Premium,
+        features, support or any other service.
       </p>
 
       <h2>Changes</h2>

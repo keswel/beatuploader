@@ -105,6 +105,10 @@ email_verify_resend_limiter = RateLimiter(
     max_requests=3, window_seconds=300, name="email_verify_resend"
 )
 
+# Early-release signup on the public landing page. Unauthenticated, but it
+# only writes one row per address, so this just blunts scripted spam.
+waitlist_limiter = RateLimiter(max_requests=5, window_seconds=300, name="waitlist")
+
 # BeatStars: each call spins up a real Playwright browser — much tighter cap
 # both to prevent abuse and to keep the box from OOMing.
 beatstars_credentials_limiter = RateLimiter(

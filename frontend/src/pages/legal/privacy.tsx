@@ -2,7 +2,7 @@ import { LegalLayout } from "./layout";
 
 export function PrivacyPage() {
   return (
-    <LegalLayout title="Privacy policy" updated="2026-10-05">
+    <LegalLayout title="Privacy policy" updated="2026-10-06">
       <p>
         Beatuploader is a desktop app that runs on your own computer. It has
         no accounts and no servers of ours in the middle: your files, your
@@ -14,7 +14,11 @@ export function PrivacyPage() {
       <h2>What we collect</h2>
       <p>
         Nothing. We don't run analytics, crash reporting or tracking in the
-        app, and the app never sends your data to us.
+        app, and the app never sends your data to us. The one exception is
+        the early-release signup on this website: if you leave your email
+        there, we keep it to tell you about early releases and
+        Premium, and to track founding membership, and nothing else. To be removed, email{" "}
+        <a href="mailto:hello@beatuploader.app">hello@beatuploader.app</a>.
       </p>
 
       <h2>What the app stores on your computer</h2>
@@ -109,7 +113,9 @@ export function PrivacyPage() {
         beatuploader.app has no analytics or cookies. It's hosted on Vercel,
         whose servers keep standard request logs (such as IP addresses) to
         operate the site. Its typefaces load from Google Fonts, so Google
-        sees your IP address when you visit.
+        sees your IP address when you visit. Emails left on the
+        early-release form are stored in our database (hosted by Render and
+        Neon) and are never shared or sold.
       </p>
 
       <h2>Donations</h2>
