@@ -3,7 +3,10 @@ import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "@/lib/api";
 
-/** Below this the signup count stays hidden; a public "3 producers" reads as empty. */
+/**
+ * Below this the signup count stays hidden; a public "3 producers" reads as empty.
+ * The server already rounds the count down to a multiple of 5, hence "25+".
+ */
 const COUNT_SHOWN_FROM = 25;
 
 /**
@@ -59,7 +62,7 @@ export function EarlyReleaseSignup({
         <span className="early-count" aria-live="polite">
           {count >= COUNT_SHOWN_FROM ? (
             <>
-              <b>{count.toLocaleString()}</b> producers on the list
+              <b>{count.toLocaleString()}+</b> producers on the list
             </>
           ) : (
             "Be one of the first"

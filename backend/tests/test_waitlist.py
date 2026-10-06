@@ -34,8 +34,18 @@ async def test_join_is_rate_limited(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_count_reflects_unique_signups(client) -> None:
+async def test_repeat_signup_looks_like_a_new_one(client) -> None:
+    first = await client.post("/api/waitlist", json={"email": "dup@example.com"})
+    again = await client.post("/api/waitlist", json={"email": "DUP@example.com"})
+    assert (first.status_code, first.content) == (again.status_code, again.content) == (204, b"")
+
+
+@pytest.mark.asyncio
+async def test_count_is_rounded_down_and_ignores_duplicates(client, db_session) -> None:
     assert (await client.get("/api/waitlist/count")).json() == {"count": 0}
-    for addr in ("a@example.com", "b@example.com", "A@example.com"):
-        await client.post("/api/waitlist", json={"email": addr})
-    assert (await client.get("/api/waitlist/count")).json() == {"count": 2}
+    # Insert directly so the signup rate limit doesn't get in the way.
+    db_session.add_all(WaitlistSignup(email=f"u{i}@example.com") for i in range(7))
+    await db_session.commit()
+    assert (await client.get("/api/waitlist/count")).json() == {"count": 5}
+    await client.post("/api/waitlist", json={"email": "U0@example.com"})  # duplicate
+    assert (await client.get("/api/waitlist/count")).json() == {"count": 5}
