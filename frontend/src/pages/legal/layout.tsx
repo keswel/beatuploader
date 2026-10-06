@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { Collage, SiteFonts, SiteFooter, SiteHeader } from "@/components/site-chrome";
 
 interface Props {
@@ -9,6 +10,13 @@ interface Props {
 
 /** Privacy / terms: a short sky band with the title, then plain reading text on paper. */
 export function LegalLayout({ title, updated, children }: Props) {
+  // The router doesn't scroll to #anchors (e.g. /terms#founding-members) itself.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash) document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView();
+    else window.scrollTo(0, 0);
+  }, [hash]);
+
   return (
     <div className="landing legal">
       <SiteFonts />
