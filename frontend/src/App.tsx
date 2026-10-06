@@ -3,6 +3,7 @@ import { Layout } from "@/components/layout";
 import { AuthGate } from "@/components/auth-gate";
 import { LandingPage } from "@/pages/landing";
 import { EarlyAccessPage } from "@/pages/early-access";
+import { ScrollOnNavigate } from "@/components/site-chrome";
 import { OverviewPage } from "@/pages/overview";
 import { UploadPage } from "@/pages/upload";
 import { PlatformsPage } from "@/pages/platforms";
@@ -22,13 +23,16 @@ export default function App() {
 
 function WebsiteRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/early-access" element={<EarlyAccessPage />} />
-      <Route path="/privacy" element={<PrivacyPage />} />
-      <Route path="/terms" element={<TermsPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <ScrollOnNavigate />
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/early-access" element={<EarlyAccessPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
 
@@ -44,7 +48,7 @@ function DesktopRoutes() {
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 }
