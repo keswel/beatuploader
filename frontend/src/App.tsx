@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/components/layout";
 import { AuthGate } from "@/components/auth-gate";
 import { LandingPage } from "@/pages/landing";
+import { EarlyAccessPage } from "@/pages/early-access";
 import { OverviewPage } from "@/pages/overview";
 import { UploadPage } from "@/pages/upload";
 import { PlatformsPage } from "@/pages/platforms";
@@ -23,6 +24,7 @@ function WebsiteRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/early-access" element={<EarlyAccessPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/terms" element={<TermsPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

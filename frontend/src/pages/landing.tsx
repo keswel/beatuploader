@@ -1,9 +1,11 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { EarlyReleaseSignup } from "@/components/early-release-signup";
 import { Collage, SiteFonts, SiteFooter, SiteHeader } from "@/components/site-chrome";
 import { DONATE_URL, DOWNLOAD_URL } from "@/lib/target";
 
-// Public page for beatuploader.app: what it does, download, donate.
+// Public page for beatuploader.app: what it does, download, early-release
+// signup, donate.
 // Cut-paper collage over generated skies; styles live in landing.css.
 
 const STEPS = [
@@ -28,6 +30,7 @@ export function LandingPage() {
       <SiteFonts />
       <SiteHeader>
         <a href="#how">How it works</a>
+        <a href="#early">Early release</a>
         <a href="#download">Download</a>
       </SiteHeader>
 
@@ -137,6 +140,7 @@ export function LandingPage() {
                 </p>
               )}
             </div>
+            <EarlyReleaseSignup id="early" showWhyLink />
           </div>
         </Collage>
       </main>

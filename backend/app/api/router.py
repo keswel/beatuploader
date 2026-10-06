@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api import auth, library, platforms, uploads
+from app.api import auth, library, platforms, uploads, waitlist
 from app.config import get_settings
 
 api_router = APIRouter(prefix="/api")
@@ -16,6 +16,8 @@ if get_settings().local_mode:
     api_router.include_router(local_auth)
 else:
     api_router.include_router(auth.router)
+    # Landing-page early-release signup; meaningless inside the desktop app.
+    api_router.include_router(waitlist.router)
 
 api_router.include_router(platforms.router)
 api_router.include_router(uploads.router)
