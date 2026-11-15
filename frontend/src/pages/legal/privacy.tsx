@@ -117,7 +117,7 @@ export function PrivacyPage() {
         the site. We use Vercel Web Analytics to count visits and see which
         pages are viewed and where visitors come from. It uses no cookies,
         doesn't identify you or follow you across sites, and we only see
-        totals. Its typefaces load from Google Fonts, so Google
+        totals. The site's typefaces load from Google Fonts, so Google
         sees your IP address when you visit. Emails left on the
         early-release form are stored in our database (hosted by Render and
         Neon) and are never shared or sold.
