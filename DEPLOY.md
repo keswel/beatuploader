@@ -54,7 +54,7 @@ You said you already have prod creds — skim this to confirm the redirect URIs 
    - Authorized redirect URIs (add both):
      - `https://api.<yourdomain>/api/auth/google/callback`
      - `https://api.<yourdomain>/api/platforms/youtube/callback`
-3. While the app is still in **Testing** mode, add yourself + each test user under "Test users". You'll need to publish + go through Google verification before opening to the public — that takes 4–6 weeks. See [CLAUDE.md → OAuth provider verification](./CLAUDE.md#known-gaps--todo).
+3. While the app is still in **Testing** mode, add yourself + each test user under "Test users". You'll need to publish + go through Google verification before opening to the public — that takes 4–6 weeks. See [ARCHITECTURE.md → Known gaps](./ARCHITECTURE.md#known-gaps).
 
 ---
 
@@ -183,4 +183,4 @@ When you outgrow the current setup (probably in this order):
 
 Migrations already run as a Render `preDeployCommand` against the new image before traffic shifts — see `render.yaml`. Multi-worker scaling won't race the alembic lock.
 
-See [CLAUDE.md → Known gaps](./CLAUDE.md#known-gaps--todo) for the full list.
+See [ARCHITECTURE.md → Known gaps](./ARCHITECTURE.md#known-gaps) for the full list.
