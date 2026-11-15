@@ -98,7 +98,8 @@ backend/   FastAPI + async SQLAlchemy  → desktop sidecar (LOCAL_MODE) or legac
 - **Errors:** never send exception text to the client. Log it with
   `log.exception(...)` and return a generic message.
 - Every schema change gets an Alembic migration in `backend/alembic/versions/`.
-  Migrations run on boot in both modes, on SQLite and Postgres, so they must
+  Migrations run on boot (always on desktop; behind `RUN_MIGRATIONS_ON_BOOT`
+  when hosted). Desktop uses SQLite and hosted uses Postgres, so they must
   work on both.
 - Rate-limit new unauthenticated or expensive endpoints with
   `limit_dependency(...)` from `services/rate_limit.py`.
@@ -149,8 +150,8 @@ backend/   FastAPI + async SQLAlchemy  → desktop sidecar (LOCAL_MODE) or legac
 - The sidecar must exit when its stdin closes. Don't remove that.
 - Bump the version in all three of `tauri.conf.json`, `Cargo.toml` and
   `desktop/package.json`, then push a `v<version>` tag.
-  **Never run the release workflow without a version bump**, because it
-  overwrites the current release.
+  **Never run the release workflow without a version bump.** It publishes
+  into the existing release and replaces the installer the website links to.
 - Pushing a tag publishes an update to every install. Only do it when asked.
 
 ### Dev environment

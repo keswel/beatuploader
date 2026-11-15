@@ -127,8 +127,9 @@ on launch and from tray → "Check for updates". Pushing a `v*` tag runs
 
 The version must match in `desktop/src-tauri/tauri.conf.json`,
 `desktop/src-tauri/Cargo.toml` and `desktop/package.json`. The workflow names
-the release from `tauri.conf.json`, so running it without bumping the version
-overwrites the current release's assets.
+the release from `tauri.conf.json`. Running it without bumping the version
+publishes a new build into the existing release, and the fixed-name installer
+the website links to is replaced (`--clobber`).
 
 The signing private key is `~/.tauri/beatuploader-updater.key` (no password),
 stored as the repo secret `TAURI_SIGNING_PRIVATE_KEY`. **If it's lost, every
@@ -396,7 +397,8 @@ YouTube description: the per-upload `description`, else the user's
 
 ## Data model
 
-`backend/app/models/`. Everything cascades from `User`.
+`backend/app/models/`. Platforms, uploads and beats cascade-delete with
+their `User`. `WaitlistSignup` is standalone.
 
 ```
 User          email, handle, password_hash?, google_sub? (unique),
@@ -447,9 +449,10 @@ round-trip, so compare datetimes only after coercing naive values to UTC.
 - `SecurityHeadersMiddleware` sends nosniff, `X-Frame-Options: DENY`, the
   referrer policy and the permissions policy. HSTS is added only when
   `DEBUG=false`.
-- OAuth `state` JWTs carry a `purpose` (`signin` with no user ID, or
-  platform-connect with `uid`), a nonce and a short `exp`. That makes them
-  the CSRF token for redirect flows.
+- OAuth `state` JWTs carry a nonce and a short `exp`, which makes them the
+  CSRF token for redirect flows. Platform-connect state carries `uid` and
+  `provider`. Hosted sign-in state carries `purpose=signin` and no user ID.
+  Don't confuse the two in callbacks.
 
 **Hosted only:**
 - bcrypt is called directly, not through passlib (its bcrypt backend is
